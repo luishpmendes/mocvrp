@@ -1,10 +1,12 @@
 %% mocvrp.tex -- Multi-objective Capacitated Vehicle Routing Problem with
 %% Optional Service (MO-CVRP-OS): problem definition and MILP formulation.
 %%
-%% Self-contained: builds with a single run of
+%% Builds with
 %%     latexmk -pdf mocvrp.tex
-%% (or two runs of pdflatex).  No external bibliography database, no
-%% shell-escape, no generated input files.
+%% which runs pdflatex/bibtex as many times as needed.  By hand:
+%%     pdflatex mocvrp && bibtex mocvrp && pdflatex mocvrp && pdflatex mocvrp
+%% Requires references.bib alongside this file.  No shell-escape, no other
+%% generated input files.
 
 \documentclass[11pt,a4paper]{article}
 
@@ -1639,69 +1641,7 @@ The first is the principled way to exclude the trivial efficient points of
 normalisation built on it.
 
 % =========================================================================
-\begin{thebibliography}{99}
-
-\bibitem{Archetti2014}
-C.~Archetti, M.~G. Speranza, and D.~Vigo.
-\newblock Vehicle routing problems with profits.
-\newblock In P.~Toth and D.~Vigo, editors, \emph{Vehicle Routing: Problems,
-  Methods, and Applications}, 2nd edition, chapter~10, pages 273--297.
-  MOS-SIAM Series on Optimization, SIAM, Philadelphia, 2014.
-
-\bibitem{Arnold2019}
-F.~Arnold, M.~Gendreau, and K.~S\"orensen.
-\newblock Efficiently solving very large-scale routing problems.
-\newblock \emph{Computers \& Operations Research}, 107:32--42, 2019.
-
-\bibitem{DIMACS2021}
-12th DIMACS Implementation Challenge: CVRP track.
-\newblock Competition rules, December 1st, 2021.
-\newblock \url{http://dimacs.rutgers.edu/programs/challenge/vrp/cvrp/}
-
-\bibitem{Ehrgott2005}
-M.~Ehrgott.
-\newblock \emph{Multicriteria Optimization}.
-\newblock Springer, Berlin, 2nd edition, 2005.
-
-\bibitem{GavishGraves1978}
-B.~Gavish and S.~C. Graves.
-\newblock The travelling salesman problem and related problems.
-\newblock Working Paper OR-078-78, Operations Research Center, Massachusetts
-  Institute of Technology, 1978.
-
-\bibitem{Jozefowiez2008}
-N.~Jozefowiez, F.~Semet, and E.-G. Talbi.
-\newblock Multi-objective vehicle routing problems.
-\newblock \emph{European Journal of Operational Research}, 189(2):293--309,
-  2008.
-
-\bibitem{Matl2018}
-P.~Matl, R.~F. Hartl, and T.~Vidal.
-\newblock Workload equity in vehicle routing problems: A survey and analysis.
-\newblock \emph{Transportation Science}, 52(2):239--260, 2018.
-
-\bibitem{MTZ1960}
-C.~E. Miller, A.~W. Tucker, and R.~A. Zemlin.
-\newblock Integer programming formulation of traveling salesman problems.
-\newblock \emph{Journal of the ACM}, 7(4):326--329, 1960.
-
-\bibitem{Queiroga2026}
-E.~Queiroga, R.~Martinelli, A.~Subramanian, E.~Uchoa, and T.~Vidal.
-\newblock The XL instances and the CVRPLib best known solution challenge.
-\newblock arXiv:2601.11467v2 [math.OC], 2026.
-
-\bibitem{TothVigo2014}
-P.~Toth and D.~Vigo, editors.
-\newblock \emph{Vehicle Routing: Problems, Methods, and Applications}.
-\newblock MOS-SIAM Series on Optimization, SIAM, Philadelphia, 2nd edition,
-  2014.
-
-\bibitem{Uchoa2017}
-E.~Uchoa, D.~Pecin, A.~Pessoa, M.~Poggi, T.~Vidal, and A.~Subramanian.
-\newblock New benchmark instances for the capacitated vehicle routing problem.
-\newblock \emph{European Journal of Operational Research}, 257(3):845--858,
-  2017.
-
-\end{thebibliography}
+\bibliographystyle{plain}
+\bibliography{references}
 
 \end{document}
