@@ -1,0 +1,1707 @@
+%% mocvrp.tex -- Multi-objective Capacitated Vehicle Routing Problem with
+%% Optional Service (MO-CVRP-OS): problem definition and MILP formulation.
+%%
+%% Self-contained: builds with a single run of
+%%     latexmk -pdf mocvrp.tex
+%% (or two runs of pdflatex).  No external bibliography database, no
+%% shell-escape, no generated input files.
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[margin=2.6cm]{geometry}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{mathtools}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{siunitx}
+\sisetup{group-separator={,},group-minimum-digits=4}
+
+\usepackage[hidelinks]{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+\allowdisplaybreaks
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{assumption}[definition]{Assumption}
+\newtheorem{example}[definition]{Example}
+\newtheorem{remark}[definition]{Remark}
+
+\crefname{assumption}{Assumption}{Assumptions}
+\Crefname{assumption}{Assumption}{Assumptions}
+\crefname{example}{Example}{Examples}
+\Crefname{example}{Example}{Examples}
+\crefname{remark}{Remark}{Remarks}
+\Crefname{remark}{Remark}{Remarks}
+
+\theoremstyle{plain}
+\newtheorem{proposition}[definition]{Proposition}
+\newtheorem{lemma}[definition]{Lemma}
+\newtheorem{corollary}[definition]{Corollary}
+
+% ---- notation shortcuts -------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Nat}{\mathbb{N}}
+\newcommand{\Feas}{\mathcal{F}}
+\newcommand{\Routes}{\mathcal{R}}
+\newcommand{\Ground}{\mathcal{S}}
+\newcommand{\Arcs}{A}
+\newcommand{\Cust}{N}
+\newcommand{\Nodes}{V}
+\newcommand{\Veh}{K}
+\newcommand{\nint}{\operatorname{nint}}
+\newcommand{\Lmax}{L^{\max}}
+\newcommand{\Wmax}{W^{\max}}
+\newcommand{\Omax}{O^{\max}}
+\newcommand{\Dmax}{D^{\max}}
+\newcommand{\Lub}{\overline{L}}
+\newcommand{\Oub}{\overline{O}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+\title{\bfseries A Multi-Objective Capacitated Vehicle Routing Problem\\
+with Optional Service:\\ Problem Definition and Mixed-Integer Formulation}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+This document defines \textup{\textsc{MO-CVRP-OS}}, a multi-objective extension of the
+Capacitated Vehicle Routing Problem (CVRP) in which serving a customer is
+\emph{optional}, and proposes a mixed-integer linear programming (MILP)
+formulation for it.  The problem is defined directly over the CVRPLIB instances
+distributed with this repository (the \textsf{X}, \textsf{XL}, \textsf{AGS} and
+\textsf{DIMACS} families, \num{222} instances in total), and every modelling
+assumption is checked against the actual instance data.  Five objectives are
+considered: maximising the number of delivered orders, minimising the number of
+routes, minimising the largest route diameter, maximising route balance in a
+max--min (egalitarian) sense, and minimising total travelled distance.  The
+first four are the objectives of interest; the fifth is included because,
+as shown in \cref{prop:degeneracy}, the first four are provably blind to the
+uniform inflation of route lengths.  All non-linear elements of the objective
+vector -- a maximum, several minima, and three ratios whose denominators are
+themselves decision-dependent maxima -- are linearised exactly, and the
+correctness of each linearisation is proved.  Modelling choices that the
+informal specification leaves open are made explicit, and the alternatives are
+stated and compared.
+\end{abstract}
+
+\tableofcontents
+
+% =========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+The CVRP asks for a set of minimum-cost vehicle routes, each starting and
+ending at a single depot, that jointly serve every customer exactly once
+without violating a common vehicle capacity~\cite{TothVigo2014}.  It is a
+single-objective problem: the cost is almost always the total travelled
+distance, and the service requirement is hard -- every customer must be
+visited.
+
+Both of these features are restrictive in practice.  A dispatcher who cannot
+serve all orders on a given day would rather choose \emph{which} orders to
+postpone than declare the instance infeasible, and total distance is rarely the
+only criterion: fleet size, the geographic compactness of each route, and the
+equitable distribution of work across drivers all matter and conflict with one
+another.  This document formalises one particular combination of these
+concerns.
+
+\paragraph{Contributions and scope.}
+\Cref{sec:data} fixes the interpretation of the CVRPLIB instance files shipped
+in \texttt{instances/} and records, as standing assumptions, the properties of
+that data that the later proofs rely on.  \Cref{sec:problem} defines the
+feasible set at the level of solutions, independently of any formulation.
+\Cref{sec:objectives} defines the five objectives, together with the
+conventions that make them well defined in degenerate cases.
+\Cref{sec:pareto} recalls the required multi-objective terminology.
+\Cref{sec:milp} gives the MILP formulation and proves it correct.
+\Cref{sec:variants} discusses the modelling decisions that were open and the
+alternatives to the ones taken.
+
+Multi-objective vehicle routing has a substantial literature of its own; see
+\cite{Jozefowiez2008} for a survey of the objectives that have been combined
+with routing and of the solution methods used.
+
+This document is a \emph{formulation} document.  It does not propose a solution
+algorithm, does not report computational experiments, and does not define a
+benchmarking protocol.  The model of \cref{sec:milp} is a reference
+formulation: it is exactly solvable only on small instances, whereas the
+instances in \texttt{instances/} have up to \num{30000} customers.
+
+% =========================================================================
+\section{Instance data and CVRPLIB conventions}
+\label{sec:data}
+
+\subsection{The instance files}
+
+The repository contains \num{222} instances in the TSPLIB-inspired CVRPLIB
+format, in four families: \textsf{X} (\num{100} instances,
+\cite{Uchoa2017}), \textsf{XL} (\num{100} instances, \cite{Queiroga2026}),
+\textsf{AGS} (\num{10} instances, \cite{Arnold2019}) and \textsf{DIMACS}
+(\num{12} instances contributed to the 12th DIMACS Implementation Challenge,
+\cite{DIMACS2021}).  Every file declares \texttt{TYPE~:~CVRP}.
+
+A file with \texttt{DIMENSION~:~$n+1$} describes $n+1$ locations numbered
+$1,\dots,n+1$.  The \texttt{DEPOT\_SECTION} of every instance in the repository
+contains the single entry $1$, so location $1$ is the depot and locations
+$2,\dots,n+1$ are the customers.  Throughout this document the depot is
+re-indexed to $0$ and customer $p$ of the file becomes customer $p-1$ of the
+model, so that
+\begin{equation}
+  \Nodes \;=\; \{0\} \cup \Cust, \qquad \Cust \;=\; \{1,2,\dots,n\},
+  \qquad n \;=\; \texttt{DIMENSION} - 1 .
+  \label{eq:nodes}
+\end{equation}
+The \texttt{CAPACITY} field gives the common vehicle capacity $Q \in \Z_{>0}$,
+and the \texttt{DEMAND\_SECTION} gives the demands $q_i \in \Z_{\ge 0}$, with
+$q_0 = 0$ for the depot in all \num{222} instances.
+
+\subsection{Distances}
+\label{sec:distances}
+
+Two \texttt{EDGE\_WEIGHT\_TYPE} values occur, and they must be handled
+differently.
+
+\paragraph{\texttt{EUC\_2D} (\num{210} instances).}
+The \texttt{NODE\_COORD\_SECTION} gives coordinates $(a_i,b_i)$ and the
+distance is the Euclidean distance \emph{rounded to the nearest integer},
+following the TSPLIB95 convention:
+\begin{equation}
+  d_{ij} \;=\; \nint\!\Bigl( \sqrt{(a_i-a_j)^2 + (b_i-b_j)^2} \Bigr),
+  \qquad \nint(t) = \bigl\lfloor t + \tfrac{1}{2} \bigr\rfloor .
+  \label{eq:euc2d}
+\end{equation}
+The instances of the literature that deviate from this convention by using
+unrounded distances -- \textsf{CMT4}, \textsf{CMT5}, \textsf{tai385} and
+\textsf{Golden9}--\textsf{Golden20}, as listed in \cite{DIMACS2021} -- are not
+part of this repository, so \eqref{eq:euc2d} applies uniformly to all
+\num{210} \texttt{EUC\_2D} instances here.
+
+\paragraph{\texttt{EXPLICIT} with \texttt{EDGE\_WEIGHT\_FORMAT~:~LOWER\_ROW}
+(\num{12} instances).}
+The six \textsf{Loggi} and six \textsf{ORTEC} instances give an explicit
+integer distance matrix, listed row by row below the diagonal, i.e.\ row $p$
+contains $d_{p,1},\dots,d_{p,p-1}$.  The \texttt{LOWER\_ROW} format encodes a
+symmetric matrix.  These are \emph{real road distances}, and they are not
+metric: sampling $2\times 10^{5}$ distinct triples per instance finds triangle
+inequality violations $d_{ij} > d_{ik} + d_{kj}$ in all twelve, in
+$0.51\%$ to $1.66\%$ of the sampled triples for the six \textsf{Loggi}
+instances and in $0.011\%$ to $0.054\%$ for the six \textsf{ORTEC} instances.  These instances also carry a
+\texttt{NODE\_COORD\_SECTION}, which is informative only: the explicit matrix
+takes precedence.
+
+Accordingly, the model below never assumes the triangle inequality, and never
+uses a valid inequality that would require it.
+
+\subsection{Fleet size}
+\label{sec:fleet}
+
+No instance in the repository declares a fleet size: the only keys that occur
+anywhere are \texttt{NAME}, \texttt{COMMENT}, \texttt{TYPE},
+\texttt{DIMENSION}, \texttt{EDGE\_WEIGHT\_TYPE},
+\texttt{EDGE\_WEIGHT\_FORMAT}, \texttt{NODE\_COORD\_TYPE} and
+\texttt{CAPACITY}.  In particular the \texttt{-k} suffix of an instance name is
+\emph{descriptive, not prescriptive}: it records the number of routes of a
+reference solution at generation time.  This is directly confirmed by the best-known-solution files distributed
+alongside the instances: of the \num{112} of them whose name carries a
+\texttt{-k} suffix, \num{22} use strictly \emph{more} routes than the name
+advertises and none uses fewer -- for instance \texttt{X-n101-k25.sol}
+contains \num{26} routes.
+
+The fleet is therefore modelled as homogeneous and unlimited, which is the
+standard CVRPLIB reading, and the number of vehicles enters the model as an
+\emph{objective} (\cref{sec:objectives}) rather than as a constraint.
+
+\subsection{Standing assumptions}
+
+The following properties were verified by parsing all \num{222} instance files;
+they are used in the proofs of \cref{sec:milp} and are collected here so that
+the dependency is explicit.
+
+\begin{assumption}[Distance matrix]
+\label{as:dist}
+$d : \Nodes \times \Nodes \to \Z_{\ge 0}$ satisfies $d_{ii} = 0$ and
+$d_{ij} = d_{ji}$.  The triangle inequality is \emph{not} assumed.  Distinct
+locations may be at distance zero: this occurs for customer pairs in the ten
+\textsf{AGS} instances, which are the only ones containing duplicate
+coordinates, and in ten of the twelve \texttt{EXPLICIT} instances, which
+contain up to four zero-distance customer pairs each.
+\end{assumption}
+
+\begin{assumption}[Demands]
+\label{as:demand}
+$q_0 = 0$ and $1 \le q_i \le Q$ for every customer $i \in \Cust$.  Over the
+\num{222} instances the customer demands range in $[1,100]$ and the capacities
+in $[3,\num{10064}]$; no instance contains a customer with zero demand, and no
+instance contains a customer whose demand exceeds the vehicle capacity.
+\end{assumption}
+
+\begin{assumption}[Depot distances]
+\label{as:depot}
+$d_{0i} \ge 1$ for every customer $i \in \Cust$.  No customer of any instance
+in the repository -- \texttt{EUC\_2D} or \texttt{EXPLICIT} -- lies at distance
+zero from the depot.
+\end{assumption}
+
+\begin{assumption}[Orders]
+\label{as:orders}
+Each customer $i \in \Cust$ carries a number of \emph{orders}
+$o_i \in \Z_{\ge 1}$.  CVRPLIB associates exactly one demand quantity with each
+customer, so the default reading used throughout is $o_i = 1$ for all $i$, in
+which case ``number of delivered orders'' and ``number of served customers''
+coincide.  The parameter is kept explicit because the formulation is unchanged
+for arbitrary positive integer $o_i$ (see \cref{sec:alt-f1}).
+\end{assumption}
+
+\Cref{as:demand,as:depot} are not cosmetic.  \Cref{as:demand} is what makes the
+single-commodity flow connectivity constraints of \cref{sec:milp} valid
+(\cref{prop:validity}), and \cref{as:depot} is what makes the route-balance
+objective well defined without an artificial safeguard (\cref{lem:welldef}).
+\Cref{as:demand} also guarantees that the trivial single-customer route is
+feasible for every customer, so that the ``maximum service'' extreme of the
+Pareto front is attained with all customers served.
+
+% =========================================================================
+\section{The problem}
+\label{sec:problem}
+
+\subsection{Routes and solutions}
+
+Let $G = (\Nodes, \Arcs)$ be the complete digraph on the node set
+\eqref{eq:nodes}, with arc set $\Arcs = \{(i,j) \in \Nodes\times\Nodes : i\ne j\}$
+and arc lengths $d_{ij}$.
+
+\begin{definition}[Route]
+\label{def:route}
+A \emph{route} is a sequence $r = (0, i_1, i_2, \dots, i_m, 0)$ with $m \ge 1$
+and $i_1,\dots,i_m$ pairwise distinct customers of $\Cust$.  Its
+\emph{customer set} is $C(r) = \{i_1,\dots,i_m\}$, and its \emph{length},
+\emph{load}, \emph{order count} and \emph{diameter} are
+\begin{align}
+  L(r) &\;=\; d_{0 i_1} \;+\; \sum_{h=1}^{m-1} d_{i_h i_{h+1}} \;+\; d_{i_m 0},
+  \label{eq:Lr}\\
+  W(r) &\;=\; \sum_{i \in C(r)} q_i,
+  \label{eq:Wr}\\
+  O(r) &\;=\; \sum_{i \in C(r)} o_i,
+  \label{eq:Or}\\
+  D(r) &\;=\; \max_{i,j \in C(r)} d_{ij}
+        \;=\; \max \bigl( \{0\} \cup \{ d_{ij} : i,j \in C(r),\, i \ne j \} \bigr).
+  \label{eq:Dr}
+\end{align}
+A route is \emph{capacity feasible} if $W(r) \le Q$.
+\end{definition}
+
+Two conventions in \cref{def:route} deserve comment.  First, a route is
+required to be non-empty ($m \ge 1$); an ``empty route'' is not a route but the
+absence of one, which is what makes the route-counting objective $f_2$ below
+meaningful.  Second, the diameter \eqref{eq:Dr} is taken over the customers of
+the route \emph{only}: the depot is excluded, so a single-customer route has
+diameter $0$.  This is the definition adopted throughout; the depot-inclusive
+and depot-radius alternatives are discussed in \cref{sec:alt-diameter}.
+
+\begin{definition}[Solution]
+\label{def:solution}
+A \emph{solution} is a finite set $\Routes = \{r_1,\dots,r_{|\Routes|}\}$ of
+capacity-feasible routes whose customer sets are pairwise disjoint, i.e.\
+$C(r) \cap C(r') = \emptyset$ for all $r \ne r' \in \Routes$.  Its
+\emph{served set} and \emph{unserved set} are
+\begin{equation}
+  \Ground(\Routes) \;=\; \bigcup_{r \in \Routes} C(r),
+  \qquad
+  \Cust \setminus \Ground(\Routes).
+\end{equation}
+The feasible set of \textup{\textsc{MO-CVRP-OS}} is the set $\Feas$ of all solutions,
+including the empty solution $\Routes = \emptyset$.
+\end{definition}
+
+Three points distinguish $\Feas$ from the feasible set of the CVRP.
+
+\begin{enumerate}[label=(\roman*),leftmargin=*]
+\item \emph{Service is optional.}  \Cref{def:solution} requires the customer
+  sets to be disjoint but does not require them to cover $\Cust$.  Customers
+  left uncovered are simply not served, and no penalty is charged for them:
+  service enters the model through the objective $f_1$ instead.  This places
+  \textup{\textsc{MO-CVRP-OS}} in the family of routing problems with profits
+  \cite{Archetti2014}, of which the prize-collecting and team-orienteering
+  problems are the best known members.
+\item \emph{No customer is visited twice.}  Disjointness of the customer sets
+  together with the distinctness requirement inside a route means that a served
+  customer is visited exactly once, as in the CVRP.  Split delivery is not
+  allowed.
+\item \emph{The fleet is unlimited.}  \Cref{def:solution} places no bound on
+  $|\Routes|$; by disjointness and non-emptiness, $|\Routes| \le n$ always.
+\end{enumerate}
+
+\begin{remark}[Routes versus route sets]
+\label{rem:seq}
+Two distinct routes may have the same customer set but different visiting
+sequences, and \cref{def:route} treats them as different.  This matters: of the
+five objectives defined next, only $L(\cdot)$ -- hence $f_4$ and $f_5$ -- is
+sensitive to the visiting order.  \Cref{prop:degeneracy} makes the consequences
+precise.
+\end{remark}
+
+% =========================================================================
+\section{The objectives}
+\label{sec:objectives}
+
+Fix a solution $\Routes \in \Feas$.  When $\Routes \ne \emptyset$, write
+\begin{equation}
+  \Lmax = \max_{r \in \Routes} L(r), \quad
+  \Wmax = \max_{r \in \Routes} W(r), \quad
+  \Omax = \max_{r \in \Routes} O(r),
+  \label{eq:maxima}
+\end{equation}
+and likewise $L^{\min}, W^{\min}, O^{\min}$ for the corresponding minima.
+
+\subsection{Definition}
+
+\begin{definition}[Objective vector]
+\label{def:objectives}
+The five objectives of \textup{\textsc{MO-CVRP-OS}} are
+\begin{align}
+  f_1(\Routes) &\;=\; \sum_{i \in \Ground(\Routes)} o_i
+    &&\longrightarrow\; \max
+    &&\text{(delivered orders)},
+  \label{eq:f1}\\[2pt]
+  f_2(\Routes) &\;=\; |\Routes|
+    &&\longrightarrow\; \min
+    &&\text{(routes used)},
+  \label{eq:f2}\\[2pt]
+  f_3(\Routes) &\;=\; \max_{r \in \Routes} D(r)
+    &&\longrightarrow\; \min
+    &&\text{(largest route diameter)},
+  \label{eq:f3}\\[2pt]
+  f_4(\Routes) &\;=\; \min_{r \in \Routes} \beta(r)
+    &&\longrightarrow\; \max
+    &&\text{(route balance)},
+  \label{eq:f4}\\[2pt]
+  f_5(\Routes) &\;=\; \sum_{r \in \Routes} L(r)
+    &&\longrightarrow\; \min
+    &&\text{(total distance)},
+  \label{eq:f5}
+\end{align}
+where the \emph{balance} of a route $r \in \Routes$ is
+\begin{equation}
+  \beta(r) \;=\; \min\left\{
+    \frac{L(r)}{\Lmax}, \;
+    \frac{W(r)/Q}{\Wmax/Q}, \;
+    \frac{O(r)}{\Omax}
+  \right\}
+  \;=\;
+  \min\left\{
+    \frac{L(r)}{\Lmax}, \;
+    \frac{W(r)}{\Wmax}, \;
+    \frac{O(r)}{\Omax}
+  \right\}.
+  \label{eq:beta}
+\end{equation}
+For the empty solution, $f_1(\emptyset) = f_2(\emptyset) = f_3(\emptyset) =
+f_5(\emptyset) = 0$ and $f_4(\emptyset) = 1$ by convention.
+\end{definition}
+
+The three components of \eqref{eq:beta} are exactly the three normalisations
+required: the route length divided by the longest route length, the capacity
+utilisation $W(r)/Q$ divided by the largest capacity utilisation among the
+routes -- in which the common factor $1/Q$ cancels, so that the component is
+simply the load ratio -- and the number of delivered orders divided by the
+largest number of orders on any route.  Each component lies in $[0,1]$ and
+equals $1$ precisely for a route attaining the corresponding maximum.
+
+The combination rule in \eqref{eq:beta} is the \emph{egalitarian} one: the
+balance of a route is its worst normalised component, and the balance of the
+solution is the balance of its worst route.  Since a minimum of minima is a
+minimum over the union,
+\begin{equation}
+  f_4(\Routes)
+  \;=\;
+  \min\left\{
+    \frac{L^{\min}}{\Lmax}, \;
+    \frac{W^{\min}}{\Wmax}, \;
+    \frac{O^{\min}}{\Omax}
+  \right\},
+  \label{eq:f4-collapsed}
+\end{equation}
+so $f_4$ is the worst of the three \emph{spread ratios} of the solution.  This
+identity is what makes the linearisation of \cref{sec:milp-balance} compact: a
+single scalar variable suffices, instead of one ratio variable per route.
+Weighted and per-route composite alternatives are discussed in
+\cref{sec:alt-balance}.
+
+\subsection{Well-definedness and elementary properties}
+
+\begin{lemma}[The denominators are positive]
+\label{lem:welldef}
+For every non-empty solution $\Routes \in \Feas$:
+$\Lmax \ge L^{\min} \ge 2$, $\Wmax \ge W^{\min} \ge 1$ and
+$\Omax \ge O^{\min} \ge 1$.  Consequently \eqref{eq:beta} and
+\eqref{eq:f4-collapsed} are well defined, with no division by zero and no need
+for a safeguard convention.
+\end{lemma}
+
+\begin{proof}
+Let $r = (0,i_1,\dots,i_m,0) \in \Routes$ with $m \ge 1$.  All terms of
+\eqref{eq:Lr} are non-negative, and the first and last are $d_{0 i_1} \ge 1$
+and $d_{i_m 0} \ge 1$ by \cref{as:depot}; if $m = 1$ these are the same two
+terms of $L(r) = 2 d_{0 i_1} \ge 2$, and if $m \ge 2$ they are distinct terms,
+so $L(r) \ge 2$ in both cases.  Similarly $W(r) \ge q_{i_1} \ge 1$ by
+\cref{as:demand} and $O(r) \ge o_{i_1} \ge 1$ by \cref{as:orders}.
+\end{proof}
+
+\begin{lemma}[Range and tightness of $f_4$]
+\label{lem:f4-range}
+For every $\Routes \in \Feas$, $f_4(\Routes) \in (0,1]$.  Moreover
+$f_4(\Routes) = 1$ if and only if all routes of $\Routes$ have the same length,
+the same load and the same order count; in particular $f_4(\Routes) = 1$
+whenever $|\Routes| \le 1$.
+\end{lemma}
+
+\begin{proof}
+The case $\Routes = \emptyset$ holds by convention.  Otherwise each component
+of \eqref{eq:f4-collapsed} is a ratio of two positive numbers
+(\cref{lem:welldef}) in which the numerator is a minimum and the denominator
+the maximum of the same finite family, hence lies in $(0,1]$; the minimum of
+three such numbers lies in $(0,1]$.  Equality with $1$ holds iff each of the
+three ratios equals $1$, i.e.\ iff $L^{\min} = \Lmax$, $W^{\min} = \Wmax$ and
+$O^{\min} = \Omax$, i.e.\ iff the three quantities are constant over
+$\Routes$.  If $|\Routes| = 1$ this is vacuous.
+\end{proof}
+
+\begin{lemma}[Integrality]
+\label{lem:integrality}
+$f_1$, $f_2$, $f_3$ and $f_5$ take values in $\Z_{\ge 0}$, and $f_4$ takes
+values in $\mathbb{Q} \cap (0,1]$ with denominator at most
+$\max\{\Lmax, \Wmax, \Omax\}$.
+\end{lemma}
+
+\begin{proof}
+Immediate from \cref{as:dist,as:demand,as:orders}: all of $d$, $q$ and $o$ are
+integer valued, so $L(\cdot)$, $W(\cdot)$, $O(\cdot)$ and $D(\cdot)$ are, and
+$f_4$ is a ratio of two such integers.
+\end{proof}
+
+\subsection{Why a fifth objective}
+
+The four objectives $f_1,\dots,f_4$ are the ones of interest: service level,
+fleet size, geographic compactness and workload fairness.  They have, however,
+a structural blind spot.
+
+\begin{proposition}[Length degeneracy of $f_1,\dots,f_4$]
+\label{prop:degeneracy}
+Let $\Routes \in \Feas$ and let $\Routes'$ be obtained from $\Routes$ by
+permuting the visiting sequence inside one or more routes, leaving all customer
+sets unchanged.  Then
+\begin{equation}
+  f_1(\Routes') = f_1(\Routes), \qquad
+  f_2(\Routes') = f_2(\Routes), \qquad
+  f_3(\Routes') = f_3(\Routes),
+\end{equation}
+while $f_4(\Routes')$ and $f_5(\Routes')$ may differ from $f_4(\Routes)$ and
+$f_5(\Routes)$.  Furthermore, the length ratio in \eqref{eq:beta} is invariant
+under a common rescaling of all route lengths, so nothing in $f_1,\dots,f_4$
+penalises long routes as such: a solution $\Routes'$ obtained from $\Routes$ by
+lengthening its shorter routes until all route lengths agree satisfies
+$f_4(\Routes') \ge f_4(\Routes)$ and $f_5(\Routes') > f_5(\Routes)$.
+Consequently, under the objective vector
+$(f_1,f_2,f_3,f_4)$ alone, a solution may be dominated by one obtained from it
+purely by \emph{lengthening} routes.
+\end{proposition}
+
+\begin{proof}
+$f_1$ depends on $\Routes$ only through $\Ground(\Routes)$, $f_2$ only through
+$|\Routes|$, and $f_3$ only through the multiset $\{C(r)\}_{r\in\Routes}$ via
+\eqref{eq:Dr}; none of the three is affected by the visiting order.  The same
+holds for the load and order components of \eqref{eq:beta}, by \eqref{eq:Wr}
+and \eqref{eq:Or}.  Only the component $L(r)/\Lmax$ sees the sequence, and it
+is a \emph{ratio}: it rewards routes of \emph{equal} length, not of small
+length.  \Cref{ex:degeneracy} exhibits a concrete pair $\Routes, \Routes'$ with
+$f_4(\Routes') = 1 > f_4(\Routes)$, $f_5(\Routes') > f_5(\Routes)$ and all
+other objectives equal.
+\end{proof}
+
+\begin{example}[Levelling down]
+\label{ex:degeneracy}
+Take $n = 6$, $Q = 15$, $q_i = 5$ and $o_i = 1$ for all $i$, with
+\texttt{EUC\_2D} coordinates
+\[
+  \text{depot } 0 = (0,0), \quad
+  1 = (1,0),\; 2 = (2,0),\; 3 = (3,0), \quad
+  4 = (0,2),\; 5 = (0,3),\; 6 = (0,4),
+\]
+so that $d$ is integer valued by \eqref{eq:euc2d}.  Consider the two solutions
+\[
+  \Routes = \bigl\{ (0,1,2,3,0),\; (0,4,5,6,0) \bigr\},
+  \qquad
+  \Routes' = \bigl\{ (0,2,1,3,0),\; (0,4,5,6,0) \bigr\},
+\]
+which serve the same customers with the same two customer sets
+$\{1,2,3\}$ and $\{4,5,6\}$, each of load $15 = Q$.  Their route lengths are
+\begin{gather*}
+  L(0,1,2,3,0) = 1+1+1+3 = 6, \qquad
+  L(0,2,1,3,0) = 2+1+2+3 = 8, \\
+  L(0,4,5,6,0) = 2+1+1+4 = 8 .
+\end{gather*}
+Both solutions have $f_1 = 6$, $f_2 = 2$ and $f_3 = \max\{d_{13}, d_{46}\} =
+\max\{2,2\} = 2$, and both have all loads and order counts equal, so the load
+and order components of \eqref{eq:f4-collapsed} equal $1$ in both.  Hence
+\[
+  f_4(\Routes) = \tfrac{6}{8} = 0.75, \quad f_5(\Routes) = 14,
+  \qquad
+  f_4(\Routes') = \tfrac{8}{8} = 1, \quad f_5(\Routes') = 16 .
+\]
+Under $(f_1,f_2,f_3,f_4)$, $\Routes'$ \emph{dominates} $\Routes$: perfect
+balance has been achieved by driving two extra kilometres for no reason.  Under
+$(f_1,\dots,f_5)$ the two are incomparable, as they should be, and the
+trade-off is made explicit to the decision maker.
+\end{example}
+
+This phenomenon -- an equity criterion improved by making the best-off worse
+rather than the worst-off better -- is well documented in the literature on
+workload equity in vehicle routing \cite{Matl2018}, and is the reason why the
+total distance $f_5$ is carried as a fifth objective rather than dropped.
+\Cref{sec:alt-f5} records the alternatives (a lexicographic tie-break, an
+$\varepsilon$-constraint on $f_5$, or restricting routes to be
+sequence-optimal), and how to recover the pure four-objective problem.
+
+\begin{remark}[Trivial efficient points]
+\label{rem:trivial}
+The empty solution attains the optimum of $f_2$, $f_3$, $f_4$ and $f_5$
+simultaneously and is therefore always efficient, at the price of the worst
+possible $f_1$.  More generally, every single-route solution has
+$f_4 = 1$ by \cref{lem:f4-range}.  These points are legitimate but
+uninformative; if they are to be excluded, the natural device is a minimum
+service level $f_1 \ge \rho \sum_{i\in\Cust} o_i$ imposed as a constraint
+(\cref{sec:alt-side}), not a modification of the objectives.
+\end{remark}
+
+% =========================================================================
+\section{Multi-objective terminology}
+\label{sec:pareto}
+
+To keep a single convention, collect the objectives of
+\cref{def:objectives} into the \emph{minimisation form}
+\begin{equation}
+  F(\Routes) \;=\;
+  \bigl( -f_1(\Routes),\, f_2(\Routes),\, f_3(\Routes),\, -f_4(\Routes),\,
+         f_5(\Routes) \bigr) \;\in\; \R^5 ,
+  \label{eq:objvec}
+\end{equation}
+so that \textup{\textsc{MO-CVRP-OS}} reads $\min_{\Routes \in \Feas} F(\Routes)$ in the
+sense of vector optimisation \cite{Ehrgott2005}.
+
+\begin{definition}[Dominance and efficiency]
+\label{def:dominance}
+For $\Routes, \Routes' \in \Feas$, $\Routes$ \emph{dominates} $\Routes'$,
+written $\Routes \prec \Routes'$, if $F_t(\Routes) \le F_t(\Routes')$ for all
+$t \in \{1,\dots,5\}$ with at least one strict inequality.  A solution
+$\Routes^\star \in \Feas$ is \emph{efficient} (Pareto optimal) if no
+$\Routes \in \Feas$ dominates it; the set of efficient solutions is the
+\emph{efficient set} $\Feas_E$, and its image $F(\Feas_E)$ is the
+\emph{non-dominated set} or \emph{Pareto front}.  An efficient solution is
+\emph{supported} if it minimises $\sum_t w_t F_t(\cdot)$ over $\Feas$ for some
+weight vector $w \in \R^5_{>0}$, and \emph{unsupported} otherwise.
+\end{definition}
+
+\begin{definition}[Ideal and nadir points]
+The \emph{ideal point} is $F^{\mathrm{id}}_t = \min_{\Routes \in \Feas}
+F_t(\Routes)$ and the \emph{nadir point} is $F^{\mathrm{nad}}_t =
+\max_{\Routes \in \Feas_E} F_t(\Routes)$, for $t = 1,\dots,5$.
+\end{definition}
+
+Two consequences of \cref{sec:objectives} are worth stating.  First,
+$\Feas$ is finite, so $\Feas_E \ne \emptyset$ and the Pareto front is finite;
+by \cref{lem:integrality} it is a finite subset of
+$\Z^3 \times \mathbb{Q} \times \Z$ up to the sign convention.  Second, $\Feas$
+is a set of combinatorial objects and not a convex set, so the Pareto front is
+in general non-convex and contains unsupported points; weighted-sum
+scalarisation cannot enumerate it, whereas the $\varepsilon$-constraint method
+can \cite{Ehrgott2005}.  \Cref{sec:alt-eps} shows that the
+$\varepsilon$-constraint treatment of $f_4$ is particularly convenient here,
+because bounding $f_4$ from below by a \emph{constant} removes the only
+non-linearity of the model.
+
+Part of the ideal point is available in closed form.  Since the empty solution
+is feasible, $f_2, f_3, f_5$ attain the value $0$ and $f_4$ attains the value
+$1$, so
+\begin{equation}
+  F^{\mathrm{id}} \;=\;
+  \Bigl( -\textstyle\sum_{i \in \Cust} o_i,\; 0,\; 0,\; -1,\; 0 \Bigr),
+\end{equation}
+where the first component uses that serving every customer is always possible
+(put each customer on its own route; feasible by \cref{as:demand}).  The ideal
+point is thus never attained by a single solution as soon as $n \ge 1$, which
+is the usual situation in multi-objective optimisation and confirms that the
+five criteria genuinely conflict.
+
+% =========================================================================
+\section{Mixed-integer linear formulation}
+\label{sec:milp}
+
+\subsection{Overview and design decisions}
+
+Three of the five objectives are \emph{route-level}: $f_2$ counts routes, $f_3$
+is a maximum over routes, and $f_4$ compares routes to one another.  A model
+must therefore be able to name an individual route, which rules out the classic
+two-index CVRP formulation in which routes are recovered only implicitly from
+the arc-incidence vector.  The formulation below is consequently
+\emph{vehicle indexed} (three index): a set $\Veh$ of interchangeable vehicles
+is introduced, and route $k$ is the tour performed by vehicle $k$.
+\Cref{sec:alt-formulations} discusses the two alternatives -- a two-index model
+with auxiliary route-identification machinery, and a set-partitioning model in
+which routes are explicit columns.
+
+Vehicle indexing costs two things, and both are addressed below: symmetry
+among the interchangeable vehicles (\cref{sec:milp-symmetry}) and a factor
+$|\Veh|$ in the model size (\cref{sec:milp-size}).
+
+\subsection{Sets, parameters and constants}
+\label{sec:milp-data}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Symbol & Meaning \\
+\midrule
+$\Cust = \{1,\dots,n\}$ & customers \\
+$\Nodes = \{0\} \cup \Cust$ & nodes; $0$ is the depot \\
+$\Arcs = \{(i,j) \in \Nodes^2 : i \ne j\}$ & arcs \\
+$\Veh = \{1,\dots,\overline{K}\}$ & vehicles (interchangeable, identical) \\
+$d_{ij} \in \Z_{\ge0}$ & distance, symmetric, $d_{ii}=0$ (\cref{as:dist}) \\
+$q_i \in \Z_{\ge1}$, $i \in \Cust$ & demand, $q_i \le Q$ (\cref{as:demand}) \\
+$o_i \in \Z_{\ge1}$, $i \in \Cust$ & orders, default $1$ (\cref{as:orders}) \\
+$Q \in \Z_{>0}$ & vehicle capacity \\
+$\overline{K}$ & fleet-size bound; default $\overline{K} = n$ \\
+$\Lub$ & upper bound on a route length \\
+$\Oub = \sum_{i\in\Cust} o_i$ & upper bound on a route order count \\
+$P \in \Z_{\ge 1}$ & resolution parameter of the balance linearisation \\
+$\Gamma = 2^{P}$ & number of grid steps, see \cref{sec:milp-balance} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Fleet-size bound.}
+By \cref{def:solution} every route is non-empty and customer sets are disjoint,
+so $|\Routes| \le n$ and $\overline{K} = n$ excludes no solution.  Any smaller
+$\overline{K}$ is a genuine restriction of $\Feas$, and one that is not
+innocuous here: the solutions that minimise $f_3$ are typically those that
+split customers into many small routes -- with $\overline{K} = n$, putting every
+customer on its own route gives $f_3 = 0$ -- so truncating $\overline{K}$ cuts
+away exactly the part of the Pareto front where $f_3$ is best.  When a smaller
+$\overline{K}$ is used for tractability this must be reported as part of the
+problem instance.
+
+\paragraph{Length bound.}
+$\Lub$ must exceed the length of any single route.  A route uses at most $n+1$
+arcs, so
+\begin{equation}
+  \Lub \;=\; (n+1)\, d^{\max}, \qquad
+  d^{\max} = \max_{(i,j) \in \Arcs} d_{ij}
+  \label{eq:Lub}
+\end{equation}
+is valid.  A tighter valid bound, useful because $\Lub$ appears in big-$M$
+coefficients, is obtained from the capacity: a route carries load at most $Q$,
+so it visits at most $m^{\max} = \max\{ m : \text{the } m \text{ smallest
+demands sum to at most } Q \}$ customers, and
+$\Lub = (m^{\max}+1)\,d^{\max}$ is valid as well.  Both bounds are computed
+from the instance data and require no assumption on $d$.
+
+\subsection{Decision variables}
+\label{sec:milp-vars}
+
+\begin{align}
+  x^k_{ij} &\in \{0,1\}, & &(i,j) \in \Arcs,\ k \in \Veh
+  && \text{vehicle } k \text{ traverses } (i,j), \\
+  y^k_i    &\in \{0,1\}, & &i \in \Cust,\ k \in \Veh
+  && \text{vehicle } k \text{ serves customer } i, \\
+  z_i      &\in \{0,1\}, & &i \in \Cust
+  && \text{customer } i \text{ is served at all}, \\
+  u^k      &\in \{0,1\}, & &k \in \Veh
+  && \text{vehicle } k \text{ performs a route}, \\
+  g_{ij}   &\ge 0,       & &(i,j) \in \Arcs
+  && \text{load carried on arc } (i,j), \\
+  D^k      &\ge 0,       & &k \in \Veh
+  && \text{diameter of route } k, \\
+  L^k,\, W^k,\, O^k &\ge 0, & &k \in \Veh
+  && \text{length, load, order count of route } k, \\
+  \Dmax,\, \Lmax,\, \Wmax,\, \Omax &\ge 0, & &
+  && \text{the corresponding maxima}, \\
+  \lambda  &\in [0,1],   & &
+  && \text{route balance}, \\
+  b_p      &\in \{0,1\}, & &p \in \{0,\dots,P\}
+  && \text{binary expansion of } \lambda, \\
+  t^{L}_p,\, t^{W}_p,\, t^{O}_p &\ge 0, & &p \in \{0,\dots,P\}
+  && \text{linearised products.}
+\end{align}
+It is convenient to abbreviate the \emph{aggregated} arc variables
+\begin{equation}
+  x_{ij} \;=\; \sum_{k \in \Veh} x^k_{ij}, \qquad (i,j) \in \Arcs,
+  \label{eq:aggregate}
+\end{equation}
+which may be substituted out or kept as defined variables.
+
+\subsection{Routing, assignment and capacity}
+\label{sec:milp-routing}
+
+\begin{align}
+  \sum_{k \in \Veh} y^k_i &\;=\; z_i,
+  & &i \in \Cust, \label{eq:c-assign}\\
+  \sum_{j \in \Nodes \setminus \{i\}} x^k_{ij} &\;=\; y^k_i,
+  & &i \in \Cust,\ k \in \Veh, \label{eq:c-out}\\
+  \sum_{j \in \Nodes \setminus \{i\}} x^k_{ji} &\;=\; y^k_i,
+  & &i \in \Cust,\ k \in \Veh, \label{eq:c-in}\\
+  \sum_{j \in \Cust} x^k_{0j} \;=\; \sum_{j \in \Cust} x^k_{j0}
+  &\;=\; u^k,
+  & &k \in \Veh, \label{eq:c-depot}\\
+  \sum_{i \in \Cust} q_i\, y^k_i &\;\le\; Q\, u^k,
+  & &k \in \Veh, \label{eq:c-cap}\\
+  u^k &\;\le\; \sum_{i \in \Cust} y^k_i,
+  & &k \in \Veh. \label{eq:c-nonempty}
+\end{align}
+
+Constraint~\eqref{eq:c-assign} is the optional-service constraint: a customer is
+assigned to at most one vehicle, and $z_i$ records whether it is assigned at
+all.  Replacing ``$= z_i$'' by ``$= 1$'' recovers the mandatory-service CVRP.
+Constraints \eqref{eq:c-out}--\eqref{eq:c-in} are the degree constraints,
+written so that a customer has in-degree and out-degree $1$ in the
+sub-graph of vehicle $k$ exactly when $k$ serves it.  \Cref{eq:c-depot} lets
+each used vehicle leave and re-enter the depot exactly once, which forbids
+multiple trips per vehicle.  \Cref{eq:c-cap} is the capacity constraint and
+simultaneously forces $y^k \equiv 0$ when $u^k = 0$, because $q_i \ge 1$ for
+all $i$ (\cref{as:demand}); the explicit linking inequalities
+$y^k_i \le u^k$ are therefore redundant, though they strengthen the linear
+relaxation and may be added.  \Cref{eq:c-nonempty} forbids a ``used'' vehicle
+with no customers, so that $\sum_k u^k$ counts routes in the sense of
+\cref{def:route}.
+
+\subsection{Connectivity}
+\label{sec:milp-flow}
+
+Constraints \eqref{eq:c-out}--\eqref{eq:c-depot} force the arc set of each
+vehicle to be a disjoint union of circuits, but do not yet force those circuits
+to pass through the depot.  Connectivity is imposed by a single-commodity flow
+of Gavish--Graves type \cite{GavishGraves1978} on the aggregated arcs
+\eqref{eq:aggregate}, where $g_{ij}$ is interpreted as the load still on board
+when arc $(i,j)$ is traversed:
+\begin{align}
+  \sum_{j \in \Nodes \setminus \{i\}} g_{ji}
+  \;-\; \sum_{j \in \Nodes \setminus \{i\}} g_{ij}
+  &\;=\; q_i\, z_i,
+  & &i \in \Cust, \label{eq:c-flowcons}\\
+  q_j\, x_{0j} \;\le\; g_{0j} &\;\le\; Q\, x_{0j},
+  & &j \in \Cust, \label{eq:c-flowdepot}\\
+  q_j\, x_{ij} \;\le\; g_{ij} &\;\le\; (Q - q_i)\, x_{ij},
+  & &i,j \in \Cust,\ i \ne j, \label{eq:c-flowcust}\\
+  g_{i0} &\;=\; 0,
+  & &i \in \Cust. \label{eq:c-flowreturn}
+\end{align}
+\Cref{eq:c-flowcons} states that each served customer absorbs its demand from
+the flow, and each unserved customer absorbs nothing.  \Cref{eq:c-flowdepot}
+bounds the load leaving the depot by the capacity, \cref{eq:c-flowcust} states
+that after visiting $i$ the vehicle carries at most $Q - q_i$ and, if it goes
+on to $j$, at least $q_j$, and \cref{eq:c-flowreturn} empties the vehicle on
+its return leg.  The lower bounds in
+\eqref{eq:c-flowdepot}--\eqref{eq:c-flowcust} are valid and tighten the linear
+relaxation; they are not needed for correctness.
+
+\subsection{Symmetry breaking}
+\label{sec:milp-symmetry}
+
+The vehicles are interchangeable, so every solution has up to
+$\overline{K}!/(\overline{K}-|\Routes|)!$ encodings.  The following two
+families of constraints select the canonical one in which routes are ordered by
+increasing lowest-index customer:
+\begin{align}
+  u^{k} &\;\ge\; u^{k+1},
+  & &k \in \{1,\dots,\overline{K}-1\}, \label{eq:c-sym1}\\
+  y^k_i &\;\le\; \sum_{j \in \Cust,\; j < i} y^{k-1}_j,
+  & &i \in \Cust,\ k \in \Veh \setminus \{1\}. \label{eq:c-sym2}
+\end{align}
+
+\begin{lemma}
+\label{lem:symmetry}
+\Cref{eq:c-sym1,eq:c-sym2} cut off no solution of $\Feas$ with at most
+$\overline{K}$ routes: every such solution admits an encoding satisfying them.
+\end{lemma}
+
+\begin{proof}
+Given $\Routes$ with $|\Routes| = \kappa \le \overline{K}$, order its routes as
+$r_1,\dots,r_\kappa$ by increasing $\mu(r) = \min C(r)$; the $\mu$-values are
+distinct because the customer sets are disjoint and non-empty.  Assign $r_k$ to
+vehicle $k$ for $k \le \kappa$ and set $u^k = 1$ iff $k \le \kappa$, which
+satisfies \eqref{eq:c-sym1}.  For \eqref{eq:c-sym2}, let $k \ge 2$ and
+$i \in \Cust$ with $y^k_i = 1$.  Then $k \le \kappa$ and
+$i \in C(r_k)$, so $i \ge \mu(r_k) > \mu(r_{k-1})$, and the customer
+$j = \mu(r_{k-1}) < i$ satisfies $y^{k-1}_j = 1$, so the right-hand side is at
+least $1$.  If $y^k_i = 0$ the constraint is trivially satisfied because its
+right-hand side is non-negative.
+\end{proof}
+
+\subsection{Route attributes and the diameter}
+\label{sec:milp-attributes}
+
+\begin{align}
+  L^k &\;=\; \sum_{(i,j) \in \Arcs} d_{ij}\, x^k_{ij},
+  & &k \in \Veh, \label{eq:c-Lk}\\
+  W^k &\;=\; \sum_{i \in \Cust} q_i\, y^k_i,
+  & &k \in \Veh, \label{eq:c-Wk}\\
+  O^k &\;=\; \sum_{i \in \Cust} o_i\, y^k_i,
+  & &k \in \Veh, \label{eq:c-Ok}\\
+  D^k &\;\ge\; d_{ij}\,\bigl( y^k_i + y^k_j - 1 \bigr),
+  & &i,j \in \Cust,\ i < j,\ k \in \Veh, \label{eq:c-Dk}\\
+  \Dmax &\;\ge\; D^k,
+  & &k \in \Veh. \label{eq:c-Dmax}
+\end{align}
+
+\Cref{eq:c-Dk} is the standard product linearisation for the term
+$d_{ij}\, y^k_i y^k_j$: it is active only when both customers are on route $k$,
+in which case it reads $D^k \ge d_{ij}$, and is implied by $D^k \ge 0$
+otherwise since $d_{ij} \ge 0$.  Only unordered pairs are needed because $d$ is
+symmetric (\cref{as:dist}).  Note that \eqref{eq:c-Dk} involves the assignment
+variables only, which is \cref{prop:degeneracy} in constraint form.
+
+\subsection{Route balance}
+\label{sec:milp-balance}
+
+The maxima are bounded from below, one-sidedly:
+\begin{align}
+  \Lmax \;\ge\; L^k, \qquad
+  \Wmax \;\ge\; W^k, \qquad
+  \Omax \;\ge\; O^k,
+  \qquad & k \in \Veh, \label{eq:c-maxima}\\
+  \Lmax \;\le\; \Lub, \qquad
+  \Wmax \;\le\; Q, \qquad
+  \Omax \;\le\; \Oub. &  \label{eq:c-maxima-ub}
+\end{align}
+The upper bounds \eqref{eq:c-maxima-ub} are valid because every individual
+route satisfies $L^k \le \Lub$, $W^k \le Q$ and $O^k \le \Oub$; they are stated
+explicitly because the product linearisation of \cref{lem:mccormick} requires a
+finite upper bound on each factor.
+The balance variable $\lambda$ is then bounded above by each of the three
+normalised components of \eqref{eq:beta}, for used routes only.  Written
+directly, this is
+\begin{align}
+  \lambda \cdot \Lmax &\;\le\; L^k + \Lub\,(1-u^k), & &k \in \Veh,
+  \label{eq:c-balL}\\
+  \lambda \cdot \Wmax &\;\le\; W^k + Q\,(1-u^k), & &k \in \Veh,
+  \label{eq:c-balW}\\
+  \lambda \cdot \Omax &\;\le\; O^k + \Oub\,(1-u^k), & &k \in \Veh.
+  \label{eq:c-balO}
+\end{align}
+The big-$M$ coefficients are the smallest valid ones: the left-hand sides are
+bounded by $\Lmax \le \Lub$, $\Wmax \le Q$ and $\Omax \le \Oub$ respectively,
+since $\lambda \le 1$.  An unused vehicle ($u^k = 0$) is thereby excluded from
+the minimum, as \cref{eq:f4} requires.
+
+Constraints \eqref{eq:c-balL}--\eqref{eq:c-balO} are the only non-linear part
+of the model: each contains the product of the continuous variable $\lambda$
+with a continuous variable.  They are linearised exactly by restricting
+$\lambda$ to a uniform grid of $\Gamma + 1 = 2^P + 1$ points in $[0,1]$ and
+expanding the grid index in binary:
+\begin{align}
+  \lambda &\;=\; \frac{1}{\Gamma} \sum_{p=0}^{P} 2^{p}\, b_p,
+  \qquad
+  \sum_{p=0}^{P} 2^{p}\, b_p \;\le\; \Gamma,
+  \label{eq:c-lambda-exp}
+\end{align}
+together with, for each $p \in \{0,\dots,P\}$, the McCormick identities for the
+products $t^L_p = b_p \Lmax$, $t^W_p = b_p \Wmax$ and $t^O_p = b_p \Omax$:
+\begin{align}
+  t^{L}_p \;\le\; \Lub\, b_p, \quad
+  t^{L}_p \;\le\; \Lmax, \quad
+  t^{L}_p \;\ge\; \Lmax - \Lub\,(1 - b_p), \quad
+  t^{L}_p \;\ge\; 0,
+  \label{eq:c-mcL}
+\end{align}
+and the analogous groups for $t^W_p$ (with $\Wmax$, $Q$) and $t^O_p$ (with
+$\Omax$, $\Oub$).  Substituting
+$\lambda \Lmax = \Gamma^{-1} \sum_p 2^p t^L_p$ and its analogues,
+\cref{eq:c-balL,eq:c-balW,eq:c-balO} become the linear constraints
+\begin{align}
+  \frac{1}{\Gamma} \sum_{p=0}^{P} 2^{p}\, t^{L}_p
+    &\;\le\; L^k + \Lub\,(1-u^k), & &k \in \Veh,
+  \label{eq:c-balL-lin}\\
+  \frac{1}{\Gamma} \sum_{p=0}^{P} 2^{p}\, t^{W}_p
+    &\;\le\; W^k + Q\,(1-u^k), & &k \in \Veh,
+  \label{eq:c-balW-lin}\\
+  \frac{1}{\Gamma} \sum_{p=0}^{P} 2^{p}\, t^{O}_p
+    &\;\le\; O^k + \Oub\,(1-u^k), & &k \in \Veh.
+  \label{eq:c-balO-lin}
+\end{align}
+
+\subsection{The model}
+\label{sec:milp-model}
+
+\begin{definition}[\textup{\textsc{MO-CVRP-OS}} MILP]
+\label{def:milp}
+\begin{align}
+  \text{maximise } \quad & f_1 = \sum_{i \in \Cust} o_i\, z_i, \label{eq:o1}\\
+  \text{minimise } \quad & f_2 = \sum_{k \in \Veh} u^k, \label{eq:o2}\\
+  \text{minimise } \quad & f_3 = \Dmax, \label{eq:o3}\\
+  \text{maximise } \quad & f_4 = \lambda, \label{eq:o4}\\
+  \text{minimise } \quad & f_5 = \sum_{k \in \Veh} L^k
+                               = \sum_{(i,j) \in \Arcs} d_{ij}\, x_{ij},
+  \label{eq:o5}
+\end{align}
+subject to
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+  \eqref{eq:c-assign}--\eqref{eq:c-nonempty}
+    & assignment, degree, depot and capacity constraints, \\
+  \eqref{eq:c-flowcons}--\eqref{eq:c-flowreturn}
+    & connectivity, \\
+  \eqref{eq:c-sym1}--\eqref{eq:c-sym2}
+    & symmetry breaking, \\
+  \eqref{eq:c-Lk}--\eqref{eq:c-Dmax}
+    & route attributes and diameter, \\
+  \eqref{eq:c-maxima}--\eqref{eq:c-balO-lin}
+    & route balance, \\
+\end{tabular}
+\end{center}
+and to the variable restrictions
+\begin{equation}
+  x,\,y,\,z,\,u,\,b \ \text{binary}, \qquad
+  g,\,D,\,L,\,W,\,O,\,\Dmax,\,\Lmax,\,\Wmax,\,\Omax,\,t \;\ge\; 0, \qquad
+  \lambda \in [0,1].
+  \label{eq:o-domains}
+\end{equation}
+\end{definition}
+
+\subsection{Correctness}
+\label{sec:milp-correct}
+
+\begin{proposition}[The feasible sets correspond]
+\label{prop:validity}
+Let $\overline{K} \ge 1$.
+\begin{enumerate}[label=(\alph*),leftmargin=*]
+\item Every $(x,y,z,u,g)$ satisfying
+  \eqref{eq:c-assign}--\eqref{eq:c-flowreturn} encodes a solution
+  $\Routes \in \Feas$ with $|\Routes| = \sum_{k} u^k \le \overline{K}$: for each
+  $k$ with $u^k = 1$ the arcs $\{(i,j) : x^k_{ij} = 1\}$ form a single circuit
+  through the depot, whose customer set is $\{i : y^k_i = 1\}$ and whose load is
+  at most $Q$; for each $k$ with $u^k = 0$ that arc set is empty.
+\item Conversely, every $\Routes \in \Feas$ with $|\Routes| \le \overline{K}$
+  admits an encoding satisfying \eqref{eq:c-assign}--\eqref{eq:c-flowreturn}
+  and the symmetry-breaking constraints \eqref{eq:c-sym1}--\eqref{eq:c-sym2}.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+(a) Fix $k$.  If $u^k = 0$ then \eqref{eq:c-cap} gives
+$\sum_i q_i y^k_i \le 0$, hence $y^k \equiv 0$ by \cref{as:demand}, hence
+$x^k \equiv 0$ by \eqref{eq:c-out} and \eqref{eq:c-depot}.  If $u^k = 1$, then
+by \eqref{eq:c-out}--\eqref{eq:c-depot} every node of
+$\{0\} \cup C_k$, where $C_k = \{i : y^k_i = 1\}$, has out-degree and in-degree
+exactly $1$ in the arc set of vehicle $k$, and every other node has degree $0$;
+such an arc set is a disjoint union of circuits covering $\{0\} \cup C_k$, and
+$C_k \ne \emptyset$ by \eqref{eq:c-nonempty}.
+
+It remains to exclude circuits avoiding the depot.  Summing \eqref{eq:c-assign}
+over $k$ shows that in the aggregated digraph
+$\widehat{G} = \bigl(\Nodes, \{(i,j) : x_{ij} \ge 1\}\bigr)$ every customer $i$ has out-degree and
+in-degree exactly $z_i \in \{0,1\}$; in particular $x_{ij} \in \{0,1\}$ for all
+arcs, and the arcs of the different vehicles are pairwise disjoint.  Suppose
+some vehicle's arc set contained a circuit $Z$ with $V(Z) \subseteq \Cust$.
+Every $i \in V(Z)$ has $z_i = 1$ and its unique incoming and unique outgoing
+arc in $\widehat{G}$ both belong to $Z$; therefore every arc of
+$\Arcs$ with exactly one endpoint in $V(Z)$ has $x_{ij} = 0$, and by
+\eqref{eq:c-flowdepot}--\eqref{eq:c-flowcust} carries $g_{ij} = 0$.  Summing
+\eqref{eq:c-flowcons} over $i \in V(Z)$, the flow on the arcs internal to $Z$
+appears once positively and once negatively and cancels, and the arcs leaving
+$V(Z)$ carry no flow, so the left-hand side vanishes, while the right-hand side
+equals $\sum_{i \in V(Z)} q_i \ge |V(Z)| \ge 1 > 0$ by \cref{as:demand}.  This
+contradiction shows that each vehicle's arc set is a single circuit through the
+depot, i.e.\ a route in the sense of \cref{def:route}, with customer set $C_k$.
+The customer sets are disjoint by \eqref{eq:c-assign} and the load bound is
+\eqref{eq:c-cap}.
+
+(b) Order the routes of $\Routes$ as in the proof of \cref{lem:symmetry} and
+assign route $r_k$ to vehicle $k$.  Set $x^k_{ij} = 1$ for the arcs of $r_k$,
+$y^k_i = 1$ for $i \in C(r_k)$, $z_i = 1$ for $i \in \Ground(\Routes)$,
+$u^k = 1$ for $k \le |\Routes|$, and all remaining variables of these families
+to $0$.  Constraints
+\eqref{eq:c-assign}--\eqref{eq:c-nonempty} hold by construction and capacity
+feasibility.  For the flow, let $g_{ij}$ be the load still on board on arc
+$(i,j)$ of the route containing it, i.e.\ for
+$r_k = (0,i_1,\dots,i_m,0)$ set
+$g_{i_h i_{h+1}} = \sum_{l > h} q_{i_l}$ for $h = 0,\dots,m$ with the
+conventions $i_0 = i_{m+1} = 0$, and $g_{ij} = 0$ on all other arcs.  Then
+\eqref{eq:c-flowcons} holds at every customer of a route because consecutive
+values differ by exactly $q_{i_h}$, and at every unserved customer because all
+incident $g$ vanish; \eqref{eq:c-flowdepot} holds because
+$g_{0 i_1} = W(r_k) \le Q$ and $g_{0i_1} \ge q_{i_1}$;
+\eqref{eq:c-flowcust} holds because
+$g_{i_h i_{h+1}} = W(r_k) - \sum_{l \le h} q_{i_l} \le Q - q_{i_h}$ and
+$g_{i_h i_{h+1}} \ge q_{i_{h+1}}$ for $h < m$; and \eqref{eq:c-flowreturn}
+holds because $g_{i_m 0} = 0$.  The symmetry-breaking constraints hold by
+\cref{lem:symmetry}.
+\end{proof}
+
+\begin{remark}[Where \cref{as:demand} is used]
+\label{rem:demand-needed}
+The proof of \cref{prop:validity}(a) uses $q_i \ge 1$ twice: to deduce
+$y^k \equiv 0$ from $u^k = 0$, and -- essentially -- to derive the
+contradiction $0 = \sum_{i \in V(Z)} q_i > 0$.  If an instance admitted a
+customer with zero demand, a depot-free circuit consisting entirely of such
+customers would satisfy \eqref{eq:c-flowcons}--\eqref{eq:c-flowreturn} and the
+formulation would be wrong.  No instance in this repository has a zero-demand
+customer, but a formulation intended for arbitrary data should either add the
+usual $\varepsilon$-demand perturbation, or replace the flow system by
+generalised subtour elimination constraints (\cref{sec:alt-sec}).
+\end{remark}
+
+\begin{proposition}[The auxiliary variables report the intended values]
+\label{prop:tightness}
+Let $(x,y,z,u,g,\dots)$ be feasible for \cref{def:milp} and let $\Routes$ be the
+solution it encodes (\cref{prop:validity}).  Then
+\begin{equation}
+  \sum_{i \in \Cust} o_i z_i = f_1(\Routes), \quad
+  \sum_{k \in \Veh} u^k = f_2(\Routes), \quad
+  \sum_{k} L^k = f_5(\Routes),
+  \label{eq:exact-objs}
+\end{equation}
+identically, while
+\begin{equation}
+  \Dmax \;\ge\; f_3(\Routes)
+  \qquad\text{and}\qquad
+  \lambda \;\le\; \bigl\lfloor f_4(\Routes) \bigr\rfloor_{\Gamma},
+  \label{eq:bound-objs}
+\end{equation}
+where $\lfloor \cdot \rfloor_{\Gamma}$ rounds down to the grid
+$\{0, 1/\Gamma, \dots, 1\}$.  Both bounds in \eqref{eq:bound-objs} are attained
+by some feasible completion of the same $(x,y,z,u,g)$.  Consequently, for any
+scalarisation that is non-decreasing in $\Dmax$ and non-increasing in
+$\lambda$ -- weighted sums with non-negative weights, $\varepsilon$-constraints,
+lexicographic orderings, and any combination of these -- an optimal solution of
+\cref{def:milp} reports $\Dmax = f_3(\Routes)$ and
+$\lambda = \lfloor f_4(\Routes) \rfloor_{\Gamma}$.
+\end{proposition}
+
+\begin{proof}
+The identities \eqref{eq:exact-objs} are immediate from
+\eqref{eq:c-assign}, \eqref{eq:c-nonempty} and \eqref{eq:c-Lk}, the last
+because the arc sets of distinct vehicles are disjoint.
+
+For $\Dmax$: by \eqref{eq:c-Dk}, $D^k \ge d_{ij}$ for every pair
+$i,j \in C_k$, so $D^k \ge D(r_k)$ and $\Dmax \ge \max_k D(r_k) = f_3(\Routes)$
+by \eqref{eq:c-Dmax}; setting $D^k = D(r_k)$ and $\Dmax = f_3(\Routes)$ is
+feasible, since \eqref{eq:c-Dk} is then satisfied with equality for a maximising
+pair and slack elsewhere, and \eqref{eq:c-Dmax} holds by definition of a
+maximum.  As $\Dmax$ occurs in no other constraint and is minimised, it equals
+$f_3(\Routes)$ at any optimum.
+
+For $\lambda$: by \eqref{eq:c-maxima}, $\Lmax \ge \max_k L^k = \max_{r \in \Routes} L(r)$ in the
+notation of \eqref{eq:maxima}, and similarly for $\Wmax, \Omax$.  For any used
+route $k$, \eqref{eq:c-balL} gives
+$\lambda \le L^k/\Lmax \le L^k/\max_{r\in\Routes} L(r)$ and analogously for the other two
+families, so $\lambda \le \beta(r_k)$ for every $k$ with $u^k = 1$, whence
+$\lambda \le f_4(\Routes)$; since \eqref{eq:c-lambda-exp} confines $\lambda$ to
+the grid, $\lambda \le \lfloor f_4(\Routes) \rfloor_\Gamma$.  Conversely,
+setting $\Lmax = \max_{r} L(r)$, $\Wmax = \max_{r} W(r)$, $\Omax = \max_{r} O(r)$,
+$\lambda = \lfloor f_4(\Routes) \rfloor_\Gamma$ with the corresponding
+$b$, and $t^L_p = b_p \Lmax$, $t^W_p = b_p \Wmax$, $t^O_p = b_p \Omax$ is
+feasible: \eqref{eq:c-mcL} and its analogues hold with equality by
+\cref{lem:mccormick} below, and
+\eqref{eq:c-balL-lin}--\eqref{eq:c-balO-lin} reduce to
+$\lambda \max_r L(r) \le L^k$, $\lambda \max_r W(r) \le W^k$ and
+$\lambda \max_r O(r) \le O^k$ for used $k$, which hold because
+$\lambda \le f_4(\Routes) \le \beta(r_k)$.  Unused $k$ are covered by the
+big-$M$ terms, which are valid by
+$\lambda \Lmax \le \Lub$, $\lambda \Wmax \le Q$, $\lambda \Omax \le \Oub$.
+Since $\Lmax, \Wmax, \Omax$ occur only in \eqref{eq:c-maxima} and in
+\eqref{eq:c-balL}--\eqref{eq:c-balO}, where decreasing them relaxes the
+constraint, and $\lambda$ is maximised, the stated values are attained.
+\end{proof}
+
+\begin{lemma}[Exactness of the product linearisation]
+\label{lem:mccormick}
+Let $b \in \{0,1\}$, let $v$ be a variable with $0 \le v \le \overline{v}$, and
+let $t$ satisfy $t \le \overline{v} b$, $t \le v$,
+$t \ge v - \overline{v}(1-b)$ and $t \ge 0$.  Then $t = bv$.  Consequently, with
+\eqref{eq:c-lambda-exp} and \eqref{eq:c-mcL},
+$\Gamma^{-1}\sum_{p} 2^{p} t^{L}_p = \lambda \Lmax$ exactly, and analogously
+for $W$ and $O$; the constraints
+\eqref{eq:c-balL-lin}--\eqref{eq:c-balO-lin} are therefore equivalent to
+\eqref{eq:c-balL}--\eqref{eq:c-balO} restricted to $\lambda$ on the grid.
+\end{lemma}
+
+\begin{proof}
+If $b = 0$ the first and fourth inequalities give $t = 0 = bv$.  If $b = 1$ the
+second and third give $v \le t \le v$, so $t = v = bv$.  Summing,
+$\Gamma^{-1}\sum_p 2^p t^L_p = \Gamma^{-1}\sum_p 2^p b_p \Lmax
+= \lambda \Lmax$ by \eqref{eq:c-lambda-exp}.
+\end{proof}
+
+\begin{corollary}[Resolution and exact recovery]
+\label{cor:resolution}
+Let $M = \max\{\Lub,\, Q,\, \Oub\}$, let $\Routes$ be the solution encoded by an
+optimal solution of \cref{def:milp} and let $\lambda$ be the reported balance.
+\begin{enumerate}[label=(\alph*),leftmargin=*]
+\item $0 \le f_4(\Routes) - \lambda < 2^{-P}$.  In particular the model is
+  exact for every value of $f_4$ that is a dyadic rational with denominator
+  dividing $\Gamma$, and approximate otherwise.
+\item Let $\mathbb{Q}_M = \{ a/c \,:\, c \in \{1,\dots,M\},\ a \in
+  \{0,\dots,c\} \}$, so that $f_4(\Routes) \in \mathbb{Q}_M$ by
+  \cref{lem:integrality}.  If $P \ge 2\log_2 M$, then
+  $[\lambda,\, \lambda + 2^{-P})$ contains exactly one element of
+  $\mathbb{Q}_M$, namely $f_4(\Routes)$; the exact value is therefore recovered
+  from $\lambda$ in post-processing, for instance by a Stern--Brocot search.
+\end{enumerate}
+\end{corollary}
+
+\begin{proof}
+(a) The grid $\{0,1/\Gamma,\dots,1\}$ has mesh $1/\Gamma = 2^{-P}$, and
+\cref{prop:tightness} gives $\lambda = \lfloor f_4(\Routes) \rfloor_\Gamma$.
+(b) Let $a/c \ne a'/c'$ be elements of $\mathbb{Q}_M$.  Then
+$|a/c - a'/c'| = |ac' - a'c|/(cc') \ge 1/(cc') \ge 1/M^2 \ge 2^{-P}$, the last
+step by $P \ge 2\log_2 M$.  Two distinct elements of $\mathbb{Q}_M$ inside
+$[\lambda, \lambda + 2^{-P})$ would differ by strictly less than $2^{-P}$, a
+contradiction, and $f_4(\Routes)$ lies in that interval by~(a).
+\end{proof}
+
+\begin{remark}[Exactness without discretisation]
+\label{rem:exactness}
+\Cref{cor:resolution} is a statement about a genuine approximation: the model of
+\cref{def:milp} is an exact MILP for $f_4$ restricted to a grid, not for $f_4$
+itself.  Three exact alternatives exist and are compared in
+\cref{sec:alt-eps}: fixing $\lambda = \theta$ as a constant, which makes
+\eqref{eq:c-balL}--\eqref{eq:c-balO} linear and is what an
+$\varepsilon$-constraint scheme does anyway; bisection on $\theta$; and keeping
+\eqref{eq:c-balL}--\eqref{eq:c-balO} as bilinear constraints and handing the
+model to a global MIQCP solver.  A fourth option keeps the structure of
+\eqref{eq:c-lambda-exp}--\eqref{eq:c-balO-lin} but replaces the dyadic grid by
+an arbitrary finite set $\Theta \subseteq [0,1]$, selected by binaries
+$s_\theta$ with $\sum_{\theta \in \Theta} s_\theta = 1$ and
+$\lambda = \sum_{\theta \in \Theta} \theta\, s_\theta$; taking
+$\Theta = \mathbb{Q}_M$ as in \cref{cor:resolution} makes the model exact, at
+the price of $\Theta(M^2)$ binaries instead of $P+1$.
+\end{remark}
+
+\subsection{Bounds and valid inequalities}
+\label{sec:milp-bounds}
+
+\begin{proposition}
+\label{prop:bounds}
+The following are valid for \cref{def:milp}.
+\begin{enumerate}[label=(\alph*),leftmargin=*]
+\item \emph{Fleet lower bound.}
+  $\sum_{k \in \Veh} u^k \;\ge\; \frac{1}{Q}\sum_{i \in \Cust} q_i z_i$,
+  and, when $z$ is fixed, the rounded form
+  $\sum_k u^k \ge \bigl\lceil \frac{1}{Q}\sum_i q_i z_i \bigr\rceil$.
+\item \emph{Diameter--fleet interaction.}  If $\sum_{k} u^k \le \kappa$ and
+  $\sum_{i} z_i = \sigma \ge 1$, then some used route serves at least
+  $\lceil \sigma/\kappa \rceil$ customers, so
+  \[
+    \Dmax \;\ge\;
+    \min\Bigl\{ \max_{i,j \in S} d_{ij} \;:\;
+      S \subseteq \Cust,\ |S| = \lceil \sigma/\kappa \rceil \Bigr\} .
+  \]
+  In particular $f_3 = 0$ forces every used route to have pairwise
+  zero-distance customers, which by \cref{as:dist} is possible only in the ten
+  \textsf{AGS} instances and the twelve \texttt{EXPLICIT} ones, and even there
+  only for very small routes.  Without a bound on $\sum_k u^k$ no non-trivial
+  lower bound on $\Dmax$ exists, since putting every customer on its own route
+  yields $f_3 = 0$.  The bound above is stated for insight: evaluating it is
+  itself NP-hard in general.
+\item \emph{Balance upper bound.}  $\lambda \le 1$, attained iff all used routes
+  have equal length, load and order count (\cref{lem:f4-range}).
+\item \emph{Distance lower bound.}  Both of
+  \[
+    f_5 \;\ge\; \Bigl( \min_{(i,j)\in\Arcs} d_{ij} \Bigr)
+                \sum_{i \in \Cust} z_i
+    \qquad\text{and}\qquad
+    f_5 \;\ge\; \frac{1}{2}\sum_{i\in\Cust} z_i
+      \Bigl( \min_{j \ne i} d_{ij} + \min_{j \ne i} d_{ji} \Bigr)
+  \]
+  are valid, and neither uses the triangle inequality.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+(a) Sum \eqref{eq:c-cap} over $k$ and use \eqref{eq:c-assign}.  The rounded form
+follows from integrality of $\sum_k u^k$.  (b) If at most $\kappa$ routes serve
+$\sigma$ customers, the pigeonhole principle puts at least
+$\lceil \sigma/\kappa \rceil$ of them on one route, whose diameter is by
+\eqref{eq:Dr} at least the smallest diameter of a customer set of that
+cardinality; the displayed bound then follows from \eqref{eq:c-Dmax}.  (c) is
+\cref{lem:f4-range}.  (d) Each served customer has exactly one outgoing and one
+incoming arc in $\widehat{G}$ by \eqref{eq:c-out}--\eqref{eq:c-in}, whose lengths
+are at least the stated minima; each arc is counted at most twice.
+\end{proof}
+
+\begin{proposition}[Complexity]
+\label{prop:hardness}
+\textup{\textsc{MO-CVRP-OS}} is NP-hard, and deciding whether a feasible solution with
+$f_1 = \sum_{i}o_i$, $f_2 \le \kappa$ and $f_5 \le B$ exists is NP-complete.
+\end{proposition}
+
+\begin{proof}
+Restricting $\Feas$ to solutions with $\Ground(\Routes) = \Cust$ and
+$|\Routes| \le \kappa$, and minimising $f_5$, is exactly the CVRP with $\kappa$
+vehicles, which is NP-hard \cite{TothVigo2014}; membership in NP of the decision
+version is clear since a solution is a polynomial-size certificate whose
+objectives are computable in polynomial time.
+\end{proof}
+
+\subsection{Model size}
+\label{sec:milp-size}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Family & Count & Type \\
+\midrule
+$x^k_{ij}$   & $\overline{K}\,n(n+1)$ & binary \\
+$y^k_i$      & $\overline{K}\,n$      & binary \\
+$z_i$        & $n$                    & binary \\
+$u^k$        & $\overline{K}$         & binary \\
+$b_p$        & $P+1$                  & binary \\
+$g_{ij}$     & $n(n+1)$               & continuous \\
+$D^k, L^k, W^k, O^k$ & $4\overline{K}$ & continuous \\
+$\Dmax,\Lmax,\Wmax,\Omax,\lambda$ & $5$ & continuous \\
+$t^{L}_p, t^{W}_p, t^{O}_p$ & $3(P+1)$ & continuous \\
+\midrule
+\eqref{eq:c-Dk} (diameter)      & $\overline{K}\,\binom{n}{2}$ & \\
+\eqref{eq:c-out}--\eqref{eq:c-in}, \eqref{eq:c-sym2} & $\Theta(\overline{K} n)$ & \\
+\eqref{eq:c-flowcons}--\eqref{eq:c-flowreturn} & $\Theta(n^2)$ & \\
+\eqref{eq:c-maxima}--\eqref{eq:c-maxima-ub}, \eqref{eq:c-balL-lin}--\eqref{eq:c-balO-lin}
+  & $6\overline{K}+3$ & \\
+\eqref{eq:c-mcL} and analogues  & $12(P+1)$ & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+With the default $\overline{K} = n$ the model has $\Theta(n^3)$ binary
+variables and $\Theta(n^3)$ constraints, dominated by the arc variables and by
+the diameter constraints \eqref{eq:c-Dk}.  The balance machinery, by contrast,
+costs only $P+1$ additional binaries and $O(\overline{K} + P)$ constraints,
+which is the payoff of the collapse \eqref{eq:f4-collapsed}.
+
+This is a reference formulation.  Direct solution is realistic only for
+instances with a few tens of customers, whereas the smallest instance in
+\texttt{instances/} has $n = 100$ and the largest $n = \num{30000}$.  For those,
+the formulation serves to define the problem unambiguously, to validate
+heuristics on small sub-instances, and as the starting point for the
+decompositions of \cref{sec:alt-formulations}.
+
+% =========================================================================
+\section{Modelling decisions and alternatives}
+\label{sec:variants}
+
+The informal specification of \textup{\textsc{MO-CVRP-OS}} leaves several points open.
+This section states the decision taken in each case, and the alternatives that
+were rejected, so that the model can be varied deliberately rather than by
+accident.  \Cref{tab:decisions} summarises.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.26\linewidth}>{\raggedright\arraybackslash}p{0.30\linewidth}>{\raggedright\arraybackslash}p{0.35\linewidth}@{}}
+\toprule
+Open point & Decision & Main alternatives \\
+\midrule
+Route diameter & customers only, \eqref{eq:Dr} &
+  depot-inclusive; depot radius; longest leg (\cref{sec:alt-diameter}) \\
+Balance combiner & egalitarian $\min$, \eqref{eq:beta} &
+  weighted per-route composite; component-wise minima
+  (\cref{sec:alt-balance}) \\
+Balance normaliser & ratio to the maximum &
+  range; standard deviation; Gini; Jain (\cref{sec:alt-balance}) \\
+Length degeneracy & fifth objective $f_5$ &
+  lexicographic tie-break; $\varepsilon$-constraint; sequence-optimal routes
+  (\cref{sec:alt-f5}) \\
+Service objective & $\sum_i o_i z_i$, $o_i = 1$ &
+  delivered demand $\sum_i q_i z_i$; profits (\cref{sec:alt-f1}) \\
+Connectivity & single-commodity flow &
+  MTZ; generalised SECs; multi-commodity flow (\cref{sec:alt-sec}) \\
+Route identification & vehicle indices &
+  two-index; set partitioning (\cref{sec:alt-formulations}) \\
+Fleet bound & $\overline{K} = n$ &
+  any $\overline{K} < n$, at the cost of part of the front
+  (\cref{sec:milp-data}) \\
+$f_4$ exactness & grid of mesh $2^{-P}$ &
+  fixed $\theta$; bisection; bilinear MIQCP (\cref{sec:alt-eps}) \\
+\bottomrule
+\end{tabular}
+\caption{Modelling decisions.}
+\label{tab:decisions}
+\end{table}
+
+\subsection{Route diameter}
+\label{sec:alt-diameter}
+
+\Cref{eq:Dr} measures the geographic spread of the \emph{customers} of a route.
+Three alternatives are natural.
+
+\begin{enumerate}[label=(\alph*),leftmargin=*]
+\item \emph{Depot-inclusive diameter}
+  $D'(r) = \max_{i,j \in C(r)\cup\{0\}} d_{ij}$, linearised by adding
+  $D^k \ge d_{0i}\, y^k_i$ for $i \in \Cust$ to \eqref{eq:c-Dk}.  It never
+  vanishes on a non-empty route (by \cref{as:depot}), so the degenerate
+  ``one customer per route gives $f_3 = 0$'' behaviour of
+  \cref{prop:bounds}(b) disappears and $f_3$ becomes
+  $\max_r \max\{D(r), \max_{i\in C(r)} d_{0i}\}$.  This makes $f_3$ conflict
+  with $f_2$ much more strongly, which may be desirable or not.
+\item \emph{Depot radius} $\rho(r) = \max_{i \in C(r)} d_{0i}$, linearised by
+  $\rho^k \ge d_{0i}\,y^k_i$.  It measures how far a route ventures rather than
+  how spread out it is, and it is cheaper: $O(\overline{K} n)$ constraints
+  instead of $O(\overline{K} n^2)$.
+\item \emph{Longest leg} $\max_{(i,j) \in r} d_{ij}$, linearised by
+  $D^k \ge d_{ij}\, x^k_{ij}$.  Unlike the other three, this depends on the
+  visiting sequence, so \cref{prop:degeneracy} would not apply to it.
+\end{enumerate}
+
+The chosen definition \eqref{eq:Dr} has one property worth naming: it depends
+on the \emph{partition} of the served customers only.  Minimising $f_3$ alone,
+subject to serving everybody with at most $\kappa$ routes, is therefore the
+min-max diameter clustering problem, which is NP-hard; $f_3$ contributes
+genuine combinatorial difficulty on top of the routing.
+
+\subsection{Combining the balance components}
+\label{sec:alt-balance}
+
+Write $\ell_r = L(r)/\Lmax$, $\upsilon_r = W(r)/\Wmax$ and
+$\omega_r = O(r)/\Omax$ for the three normalised components of route $r$, and
+let $\alpha,\beta,\gamma \ge 0$ with $\alpha+\beta+\gamma = 1$.  Three
+combination rules were considered:
+\begin{align}
+  f_4^{\,\mathrm{egal}}(\Routes)
+    &= \min_{r \in \Routes} \min\{\ell_r, \upsilon_r, \omega_r\}
+    && \text{(adopted, \eqref{eq:beta})},
+  \label{eq:bal-egal}\\
+  f_4^{\,\mathrm{comp}}(\Routes)
+    &= \min_{r \in \Routes}
+       \bigl( \alpha \ell_r + \beta \upsilon_r + \gamma \omega_r \bigr)
+    && \text{(per-route composite, then min)},
+  \label{eq:bal-comp}\\
+  f_4^{\,\mathrm{cw}}(\Routes)
+    &= \alpha \min_{r} \ell_r + \beta \min_{r} \upsilon_r
+       + \gamma \min_{r} \omega_r
+    && \text{(component-wise minima, then combine)}.
+  \label{eq:bal-cw}
+\end{align}
+
+\begin{proposition}
+\label{prop:bal-order}
+For every $\Routes \in \Feas$ and all admissible weights,
+\begin{equation}
+  f_4^{\,\mathrm{egal}}(\Routes)
+  \;\le\; f_4^{\,\mathrm{cw}}(\Routes)
+  \;\le\; f_4^{\,\mathrm{comp}}(\Routes),
+\end{equation}
+and all three equal $1$ simultaneously, precisely under the conditions of
+\cref{lem:f4-range}.
+\end{proposition}
+
+\begin{proof}
+For the right inequality, $\min_r$ of a sum is at least the sum of the
+$\min_r$'s of its terms, applied to \eqref{eq:bal-comp} with non-negative
+weights.  For the left, $\min\{a,b,c\} \le \alpha a + \beta b + \gamma c$
+whenever $\alpha+\beta+\gamma=1$ and $\alpha,\beta,\gamma \ge 0$; apply this
+with $a = \min_r \ell_r$ and so on, and note
+$f_4^{\,\mathrm{egal}} = \min\{\min_r \ell_r, \min_r \upsilon_r,
+\min_r \omega_r\}$ by \eqref{eq:f4-collapsed}.  All three equal $1$ iff each
+ratio equals $1$ for every route, which is \cref{lem:f4-range}.
+\end{proof}
+
+The adopted rule \eqref{eq:bal-egal} is thus the most conservative of the
+three, requires no weights to be chosen, and -- by the collapse
+\eqref{eq:f4-collapsed} -- costs a single scalar variable $\lambda$.
+\Cref{eq:bal-comp} is the most permissive: a route may be poor in one
+dimension and compensate in another.  Implementing \eqref{eq:bal-comp} requires
+one ratio variable $\pi_r$ per route and component, hence
+$3\overline{K}(P+1)$ binaries instead of $P+1$; \eqref{eq:bal-cw} requires
+three, which is still cheap.
+
+Rules that are not ratios to the maximum are also possible: the range
+$\Lmax - L^{\min}$ (to be minimised, and linear in the model variables, so it
+would need no linearisation at all), the standard deviation of the route
+lengths (convex quadratic), the Gini coefficient (linearisable with
+$O(\overline{K}^2)$ absolute-value variables), or Jain's fairness index
+$(\sum_k L^k)^2 / (\,|\Routes| \sum_k (L^k)^2)$ (a ratio of quadratics).  The
+survey of \cite{Matl2018} compares such measures for vehicle routing
+specifically and documents the pathology of \cref{prop:degeneracy} -- an equity
+measure improved by making the best-off worse -- for min-max and range-based
+measures alike, which is precisely why $f_5$ is retained here.
+
+\subsection{The service objective}
+\label{sec:alt-f1}
+
+\Cref{eq:f1} counts orders.  With the default $o_i = 1$ of \cref{as:orders} it
+counts served customers.  Two alternatives require no change to the
+formulation, only to the coefficients of \eqref{eq:o1}:
+\emph{delivered demand} $\sum_{i} q_i z_i$, appropriate when the quantity
+shipped matters more than the number of stops, obtained by setting
+$o_i = q_i$; and \emph{profit} $\sum_i p_i z_i$ for instance-specific prizes
+$p_i$, which is the classical prize-collecting objective
+\cite{Archetti2014}.  Note that the choice also propagates into the third
+component of the balance measure \eqref{eq:beta}, which is defined in terms of
+$O(r) = \sum_{i \in C(r)} o_i$; if orders and balance should be counted
+differently, two separate parameter vectors must be introduced.
+
+\subsection{Handling the length degeneracy}
+\label{sec:alt-f5}
+
+\Cref{prop:degeneracy} forces a choice.  Four responses are available.
+
+\begin{enumerate}[label=(\alph*),leftmargin=*]
+\item \emph{A fifth objective} (adopted).  The trade-off between balance and
+  distance becomes explicit and is left to the decision maker.  Cost: a
+  five-dimensional Pareto front, which is harder to compute and to present.
+\item \emph{A lexicographic tie-break.}  Keep the four-objective vector and
+  refine the dominance relation of \cref{def:dominance} by declaring
+  $\Routes \prec \Routes'$ also when $F_{1:4}(\Routes) = F_{1:4}(\Routes')$ and
+  $f_5(\Routes) < f_5(\Routes')$.  The resulting efficient set is a subset of
+  the four-objective one containing, for each attainable
+  $(f_1,f_2,f_3,f_4)$ vector, only the shortest solutions achieving it.  This
+  is the least intrusive fix and is recommended when a four-objective front is
+  required for comparability with other work.
+\item \emph{An $\varepsilon$-constraint on distance.}  Keep four objectives and
+  add $f_5 \le \overline{d}$ for an instance-specific budget, e.g.\ a multiple
+  of a best-known CVRP solution value.  Sound, but the front then depends on an
+  exogenous parameter.
+\item \emph{Sequence-optimal routes.}  Redefine $\Feas$ to contain only
+  solutions in which each route is a minimum-length Hamiltonian circuit on
+  $C(r) \cup \{0\}$.  This removes the degeneracy at the source --
+  \cref{prop:degeneracy} becomes vacuous because the sequence is a function of
+  the customer set -- and reduces \textup{\textsc{MO-CVRP-OS}} to a pure partitioning
+  problem.  The price is that feasibility becomes NP-hard to verify, so the
+  condition has no compact MILP expression; it is natural only in the
+  set-partitioning model of \cref{sec:alt-formulations}, where it amounts to
+  restricting the column set $\Omega$ to sequence-optimal routes.
+\end{enumerate}
+
+Dropping $f_5$ from \cref{def:milp} recovers the pure four-objective problem;
+nothing else in the formulation changes.
+
+\subsection{Connectivity constraints}
+\label{sec:alt-sec}
+
+The single-commodity flow of \cref{sec:milp-flow} was chosen because it is
+compact, because it is stronger than the Miller--Tucker--Zemlin alternative,
+and because its validity argument survives optional service.  The alternatives:
+
+\begin{enumerate}[label=(\alph*),leftmargin=*]
+\item \emph{Miller--Tucker--Zemlin} \cite{MTZ1960}, per vehicle: variables
+  $s^k_i$ with $q_i \le s^k_i \le Q$ and
+  \[
+    s^k_i - s^k_j + Q\,x^k_{ij} \;\le\; Q - q_j,
+    \qquad i,j \in \Cust,\ i \ne j,\ k \in \Veh .
+  \]
+  Compact and simple, but its linear relaxation is dominated by that of
+  \eqref{eq:c-flowcons}--\eqref{eq:c-flowcust}, and it needs
+  $\Theta(\overline{K} n^2)$ constraints against $\Theta(n^2)$ for the
+  aggregated flow.
+\item \emph{Generalised subtour elimination constraints}, in the form adapted
+  to optional service:
+  \[
+    \sum_{(i,j) \in \Arcs,\; i,j \in S} x_{ij}
+      \;\le\; \sum_{i \in S} z_i - z_h,
+    \qquad S \subseteq \Cust,\ |S| \ge 2,\ h \in S .
+  \]
+  Exponentially many, separated in polynomial time by minimum-cut
+  computations.  Exact without \cref{as:demand}, which makes it the right
+  choice if zero-demand customers must be supported
+  (\cref{rem:demand-needed}).
+\item \emph{Directed capacity constraints}
+  $\sum_{(i,j) \in \delta^+(S)} x_{ij} \ge \frac{1}{Q}\sum_{i \in S} q_i z_i$
+  for $S \subseteq \Cust$.  Valid as written; note that the familiar rounded
+  form $\lceil q(S)/Q \rceil$ is \emph{not} directly available here, because
+  the right-hand side depends on the variables $z$, and rounding is legitimate
+  only after $z$ has been fixed (for example in a branch where the served set
+  is decided).
+\item \emph{Multi-commodity flow}, one commodity per served customer: the
+  strongest compact relaxation, at $\Theta(n^3)$ variables, which is not
+  attractive at the sizes considered here.
+\end{enumerate}
+
+\subsection{Alternative formulations}
+\label{sec:alt-formulations}
+
+\paragraph{Two-index model.}
+Replacing $x^k_{ij}$ by $x_{ij}$ removes the factor $\overline{K}$ from the
+model size and the vehicle symmetry with it, and suffices for $f_1$, $f_5$ and
+connectivity.  It does not suffice for $f_2$, $f_3$ or $f_4$: the number of
+routes is recoverable as $\sum_{j} x_{0j}$, but the diameter and the balance
+measure need to know \emph{which} customers share a route, which the aggregated
+arc vector does not express without reintroducing an assignment structure.  The
+undirected variant, with $e_{ij} \in \{0,1\}$ for $i,j \in \Cust$ and
+$e_{0j} \in \{0,1,2\}$ to allow single-customer routes, has the same
+limitation.
+
+\paragraph{Set partitioning.}
+Let $\Omega$ be the set of all capacity-feasible routes, $a_{ir} = 1$ if route
+$r \in \Omega$ visits customer $i$, and $\theta_r \in \{0,1\}$ select route $r$.
+With $L_r$, $W_r$, $O_r$, $D_r$ the (constant) attributes of column $r$:
+\begin{align}
+  \sum_{r \in \Omega} a_{ir}\,\theta_r &= z_i \le 1, & &i \in \Cust, \\
+  f_1 = \sum_{i} o_i z_i, \quad
+  f_2 &= \sum_{r \in \Omega} \theta_r, \quad
+  f_5 = \sum_{r \in \Omega} L_r \theta_r, \\
+  \Dmax &\ge D_r\,\theta_r, & &r \in \Omega, \\
+  \Lmax \ge L_r \theta_r, \quad
+  \lambda \cdot \Lmax &\le L_r + \Lub\,(1-\theta_r), & &r \in \Omega,
+\end{align}
+and analogously for $W$ and $O$.  Connectivity and capacity are enforced
+implicitly by the definition of $\Omega$, all four route attributes are
+constants, and the sequence-optimality of \cref{sec:alt-f5}(d) is imposed
+simply by restricting $\Omega$.  The obstacle is that $\Dmax$, $\Lmax$,
+$\Wmax$, $\Omax$ and $\lambda$ \emph{couple} the columns, so the linear
+relaxation is not a pure set-partitioning LP and its pricing problem is not the
+usual elementary shortest path problem with resource constraints: the dual
+information attached to the coupling constraints must be carried into the
+pricing.  A practical route is to fix $(\Dmax, \Lmax, \Wmax, \Omax, \lambda)$
+in an outer enumeration or bisection -- see \cref{sec:alt-eps} -- and to solve
+a standard branch-and-price for each fixed tuple.
+
+\subsection{Scalarisation, and exact treatment of \texorpdfstring{$f_4$}{f4}}
+\label{sec:alt-eps}
+
+Because $\Feas$ is combinatorial, the Pareto front has unsupported points and
+weighted-sum scalarisation cannot enumerate it; the $\varepsilon$-constraint
+method can \cite{Ehrgott2005}.  For \textup{\textsc{MO-CVRP-OS}} this is doubly
+convenient.
+
+\begin{enumerate}[label=(\alph*),leftmargin=*]
+\item \emph{$f_4$ as a constraint is linear.}  Imposing $f_4 \ge \theta$ for a
+  \emph{constant} $\theta \in [0,1]$ turns
+  \eqref{eq:c-balL}--\eqref{eq:c-balO} into
+  \[
+    \theta\, \Lmax \le L^k + \Lub(1-u^k), \quad
+    \theta\, \Wmax \le W^k + Q(1-u^k), \quad
+    \theta\, \Omax \le O^k + \Oub(1-u^k),
+  \]
+  which are linear.  The entire apparatus
+  \eqref{eq:c-lambda-exp}--\eqref{eq:c-balO-lin} can then be deleted, and the
+  model is an exact MILP with no discretisation error whatsoever
+  (\cref{rem:exactness}).  Since $f_4$ takes finitely many rational values
+  (\cref{lem:integrality}), bisection on $\theta$ down to the separation
+  $1/M^2$ of \cref{cor:resolution} computes $\max f_4$ exactly in
+  $O(\log M)$ MILP solves, with $M = \max\{\Lub, Q, \Oub\}$.
+\item \emph{$f_3$ as a constraint is a preprocessing rule.}  Imposing
+  $f_3 \le \varepsilon_3$ is equivalent to forbidding two customers at distance
+  more than $\varepsilon_3$ from sharing a route:
+  \[
+    y^k_i + y^k_j \le 1
+    \qquad \text{for all } i<j \text{ with } d_{ij} > \varepsilon_3,\
+    k \in \Veh,
+  \]
+  which also lets the variables $D^k$ and $\Dmax$ and the constraints
+  \eqref{eq:c-Dk}--\eqref{eq:c-Dmax} be dropped entirely.  This is a far better
+  behaved model than the min-max form and is the recommended way to explore the
+  $f_3$ dimension.
+\item \emph{Bilinear form.}  Keeping \eqref{eq:c-balL}--\eqref{eq:c-balO} as
+  written yields a mixed-integer bilinear program (MIQCP) that a global solver
+  can handle directly.  This is exact and compact but gives up the MILP
+  machinery; it is mentioned for completeness, not recommended.
+\item \emph{Dinkelbach.}  If only one of the three components of
+  \eqref{eq:beta} is retained -- say the length component, so that
+  $f_4 = L^{\min}/\Lmax$ -- then maximising $f_4$ is a single-ratio
+  mixed-integer fractional program, solvable exactly by Dinkelbach's algorithm:
+  iterate $\max\{L^{\min} - \theta\,\Lmax\}$ and update
+  $\theta \leftarrow L^{\min}/\Lmax$ at the incumbent.  The sum-of-ratios
+  structure of \eqref{eq:bal-comp} and \eqref{eq:bal-cw} does not admit this
+  treatment, which is a further argument for the egalitarian rule
+  \eqref{eq:bal-egal}.
+\end{enumerate}
+
+\subsection{Optional side constraints}
+\label{sec:alt-side}
+
+None of the following is part of \textup{\textsc{MO-CVRP-OS}} as defined, but each is a
+one-line addition to \cref{def:milp} and each is standard in applications.
+
+\begin{align}
+  \sum_{i \in \Cust} o_i z_i &\;\ge\; \rho \sum_{i \in \Cust} o_i,
+  & &\text{minimum service level } \rho \in [0,1]
+  \text{ (see \cref{rem:trivial})}, \\
+  z_i &\;=\; 1, \quad i \in M \subseteq \Cust,
+  & &\text{mandatory customers}, \\
+  \sum_{k \in \Veh} u^k &\;\le\; \kappa,
+  & &\text{fleet cap}, \\
+  L^k &\;\le\; \overline{L}^{\,\mathrm{route}}, \quad k \in \Veh,
+  & &\text{maximum route length or duration}.
+\end{align}
+The first is the principled way to exclude the trivial efficient points of
+\cref{rem:trivial}; note that it changes the ideal point and therefore any
+normalisation built on it.
+
+% =========================================================================
+\begin{thebibliography}{99}
+
+\bibitem{Archetti2014}
+C.~Archetti, M.~G. Speranza, and D.~Vigo.
+\newblock Vehicle routing problems with profits.
+\newblock In P.~Toth and D.~Vigo, editors, \emph{Vehicle Routing: Problems,
+  Methods, and Applications}, 2nd edition, chapter~10, pages 273--297.
+  MOS-SIAM Series on Optimization, SIAM, Philadelphia, 2014.
+
+\bibitem{Arnold2019}
+F.~Arnold, M.~Gendreau, and K.~S\"orensen.
+\newblock Efficiently solving very large-scale routing problems.
+\newblock \emph{Computers \& Operations Research}, 107:32--42, 2019.
+
+\bibitem{DIMACS2021}
+12th DIMACS Implementation Challenge: CVRP track.
+\newblock Competition rules, December 1st, 2021.
+\newblock \url{http://dimacs.rutgers.edu/programs/challenge/vrp/cvrp/}
+
+\bibitem{Ehrgott2005}
+M.~Ehrgott.
+\newblock \emph{Multicriteria Optimization}.
+\newblock Springer, Berlin, 2nd edition, 2005.
+
+\bibitem{GavishGraves1978}
+B.~Gavish and S.~C. Graves.
+\newblock The travelling salesman problem and related problems.
+\newblock Working Paper OR-078-78, Operations Research Center, Massachusetts
+  Institute of Technology, 1978.
+
+\bibitem{Jozefowiez2008}
+N.~Jozefowiez, F.~Semet, and E.-G. Talbi.
+\newblock Multi-objective vehicle routing problems.
+\newblock \emph{European Journal of Operational Research}, 189(2):293--309,
+  2008.
+
+\bibitem{Matl2018}
+P.~Matl, R.~F. Hartl, and T.~Vidal.
+\newblock Workload equity in vehicle routing problems: A survey and analysis.
+\newblock \emph{Transportation Science}, 52(2):239--260, 2018.
+
+\bibitem{MTZ1960}
+C.~E. Miller, A.~W. Tucker, and R.~A. Zemlin.
+\newblock Integer programming formulation of traveling salesman problems.
+\newblock \emph{Journal of the ACM}, 7(4):326--329, 1960.
+
+\bibitem{Queiroga2026}
+E.~Queiroga, R.~Martinelli, A.~Subramanian, E.~Uchoa, and T.~Vidal.
+\newblock The XL instances and the CVRPLib best known solution challenge.
+\newblock arXiv:2601.11467v2 [math.OC], 2026.
+
+\bibitem{TothVigo2014}
+P.~Toth and D.~Vigo, editors.
+\newblock \emph{Vehicle Routing: Problems, Methods, and Applications}.
+\newblock MOS-SIAM Series on Optimization, SIAM, Philadelphia, 2nd edition,
+  2014.
+
+\bibitem{Uchoa2017}
+E.~Uchoa, D.~Pecin, A.~Pessoa, M.~Poggi, T.~Vidal, and A.~Subramanian.
+\newblock New benchmark instances for the capacitated vehicle routing problem.
+\newblock \emph{European Journal of Operational Research}, 257(3):845--858,
+  2017.
+
+\end{thebibliography}
+
+\end{document}
