@@ -1,0 +1,6 @@
+bin
+.vscode
+__pycache__
+*.swp
+.Rhistory
+.Rdata
