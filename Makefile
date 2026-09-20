@@ -1,7 +1,9 @@
 CPP=g++
 CARGS=-std=c++17 -O3 -g0 -m64
 BRKGAINC=-I ../nsbrkga/nsbrkga
-INC=-I src $(BRKGAINC)
+BOOSTINC=-I /opt/boost/include -L /opt/boost/lib -lboost_serialization
+PAGMOINC=-I /opt/pagmo/include -L /opt/pagmo/lib -Wl,-R/opt/pagmo/lib -lpagmo -ltbb -pthread
+INC=-I src $(BRKGAINC) $(BOOSTINC) $(PAGMOINC)
 MKDIR=mkdir -p
 RM=rm -rf
 SRC=$(PWD)/src
@@ -69,10 +71,40 @@ $(BIN)/exec/nsbrkga_solver_exec : $(BIN)/instance/instance.o \
 
 nsbrkga_solver_exec : $(BIN)/exec/nsbrkga_solver_exec
 
+$(BIN)/test/nsga2_solver_test : $(BIN)/instance/instance.o \
+                                $(BIN)/solution/solution.o \
+                                $(BIN)/solver/solver.o \
+                                $(BIN)/solver/nsga2/problem.o \
+                                $(BIN)/solver/nsga2/nsga2_solver.o \
+                                $(BIN)/test/nsga2_solver_test.o
+	@echo "--> Linking objects..."
+	$(CPP) -o $@ $^ $(CARGS) $(INC)
+	@echo
+	@echo "--> Running test..."
+	$(BIN)/test/nsga2_solver_test
+	@echo
+
+nsga2_solver_test : $(BIN)/test/nsga2_solver_test
+
+$(BIN)/exec/nsga2_solver_exec : $(BIN)/instance/instance.o \
+                                $(BIN)/solution/solution.o \
+                                $(BIN)/solver/solver.o \
+                                $(BIN)/solver/nsga2/problem.o \
+                                $(BIN)/solver/nsga2/nsga2_solver.o \
+                                $(BIN)/utils/argument_parser.o \
+                                $(BIN)/exec/nsga2_solver_exec.o
+	@echo "--> Linking objects..."
+	$(CPP) -o $@ $^ $(CARGS) $(INC)
+	@echo
+
+nsga2_solver_exec : $(BIN)/exec/nsga2_solver_exec
+
 tests : instance_test \
         solution_test \
-        nsbrkga_solver_test
+        nsbrkga_solver_test \
+        nsga2_solver_test
 
-execs : nsbrkga_solver_exec
+execs : nsbrkga_solver_exec \
+        nsga2_solver_exec
 
 all : tests execs

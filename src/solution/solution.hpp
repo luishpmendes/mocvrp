@@ -23,6 +23,21 @@ class Solution {
                           const std::vector<double> & valueB,
                           const std::vector<NSBRKGA::Sense> & senses);
 
+    /*************************************************************
+     * Negates, in place, the entries of the specified value whose
+     * sense is to maximize, converting between the optimization
+     * senses of the instance and the convention of minimizing
+     * every objective.
+     *
+     * This conversion is its own inverse, so the same call takes
+     * a value in either direction.
+     *
+     * @param value  the value to be converted.
+     * @param senses the optimization senses.
+     *************************************************************/
+    static void negate_maximized(std::vector<double> & value,
+                                 const std::vector<NSBRKGA::Sense> & senses);
+
     /****************************
      * The instance been solved.
      ****************************/

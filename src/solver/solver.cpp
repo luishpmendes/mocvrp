@@ -138,6 +138,73 @@ bool Solver::update_best_individuals(
     return result;
 }
 
+bool Solver::update_best_individuals(const pagmo::population & pop) {
+    std::vector<std::pair<std::vector<double>, std::vector<double>>>
+        new_individuals(pop.size());
+
+    // Every objective is minimized inside pagmo, so the values are negated
+    // back into the optimization senses of the instance.
+    for (std::size_t i = 0; i < pop.size(); i++) {
+        new_individuals[i] = std::make_pair(pop.get_f()[i], pop.get_x()[i]);
+        Solution::negate_maximized(new_individuals[i].first,
+                                   this->instance.senses);
+    }
+
+    return this->update_best_individuals(new_individuals);
+}
+
+void Solver::capture_snapshot(const pagmo::population & pop) {
+    double time_snapshot = this->elapsed_time();
+
+    this->best_solutions_snapshots.emplace_back(std::make_tuple(
+                this->num_iterations,
+                time_snapshot,
+                std::vector<std::vector<double>>(
+                    this->best_individuals.size())));
+
+    for (std::size_t i = 0; i < this->best_individuals.size(); i++) {
+        std::get<2>(this->best_solutions_snapshots.back())[i] =
+            this->best_individuals[i].first;
+    }
+
+    this->f = pop.get_f();
+
+    for (std::vector<double> & value : this->f) {
+        Solution::negate_maximized(value, this->instance.senses);
+    }
+
+    this->current_individuals.resize(pop.size());
+
+    for (std::size_t i = 0; i < pop.size(); i++) {
+        this->current_individuals[i] = std::make_pair(this->f[i],
+                                                      pop.get_x()[i]);
+    }
+
+    this->fronts = NSBRKGA::Population::nonDominatedSort<std::vector<double>>(
+            this->current_individuals,
+            this->instance.senses);
+
+    // Every pagmo algorithm evolves a single population.
+    this->num_non_dominated_snapshots.push_back(std::make_tuple(
+                this->num_iterations,
+                time_snapshot,
+                std::vector<unsigned>(1, this->fronts.front().size())));
+
+    this->num_fronts_snapshots.push_back(std::make_tuple(
+                this->num_iterations,
+                time_snapshot,
+                std::vector<unsigned>(1, this->fronts.size())));
+
+    this->populations_snapshots.push_back(std::make_tuple(
+                this->num_iterations,
+                time_snapshot,
+                std::vector<std::vector<std::vector<double>>>(1, this->f)));
+
+    this->time_last_snapshot = time_snapshot;
+    this->iteration_last_snapshot = this->num_iterations;
+    this->num_snapshots++;
+}
+
 std::ostream & operator <<(std::ostream & os, const Solver & solver) {
     os << "Instance: " << solver.instance.name << std::endl
        << "Number of objectives: " << solver.instance.num_objectives

@@ -36,6 +36,15 @@ bool Solution::dominates(const std::vector<double> & valueA,
     return at_least_as_good && better;
 }
 
+void Solution::negate_maximized(std::vector<double> & value,
+                                const std::vector<NSBRKGA::Sense> & senses) {
+    for (std::size_t i = 0; i < value.size() && i < senses.size(); i++) {
+        if (senses[i] == NSBRKGA::Sense::MAXIMIZE) {
+            value[i] = -value[i];
+        }
+    }
+}
+
 void Solution::compute_value() {
     this->value.resize(this->instance.num_objectives, 0.0);
     this->value.assign(this->instance.num_objectives, 0.0);

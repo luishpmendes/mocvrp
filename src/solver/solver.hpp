@@ -1,6 +1,7 @@
 #pragma once
 
 #include "solution/solution.hpp"
+#include <pagmo/population.hpp>
 #include <chrono>
 #include <limits>
 #include <random>
@@ -142,6 +143,24 @@ class Solver {
         std::vector<std::vector<std::vector<double>>>>>
             populations_snapshots = {};
 
+    /*********************************************************
+     * The individuals of the current population.
+     *********************************************************/
+    std::vector<std::pair<std::vector<double>, std::vector<double>>>
+        current_individuals = {};
+
+    /***********************************************************
+     * The non-dominated fronts of the current population.
+     ***********************************************************/
+    std::vector<std::vector<std::pair<std::vector<double>,
+                                      std::vector<double>>>> fronts = {};
+
+    /**********************************************************************
+     * The values of the current population, in the optimization senses of
+     * the instance.
+     **********************************************************************/
+    std::vector<std::vector<double>> f = {};
+
     /*************************************************
      * The start time.
      *************************************************/
@@ -257,6 +276,26 @@ class Solver {
             const std::vector<
                 std::pair<std::vector<double>,
                           std::vector<double>>> & new_individuals);
+
+    /*********************************************************************
+     * Update the best individuals found so far.
+     *
+     * The values of the specified population are negated back into the
+     * optimization senses of the instance, since every objective is
+     * minimized inside pagmo.
+     *
+     * @param pop the current population.
+     *
+     * @return true if the best individual are modified; false otherwise.
+     *********************************************************************/
+    bool update_best_individuals(const pagmo::population & pop);
+
+    /*******************************************************
+     * Capture a snapshot of the current population.
+     *
+     * @param pop the current population.
+     *******************************************************/
+    void capture_snapshot(const pagmo::population & pop);
 
     /*************************
      * Solve the instance.
