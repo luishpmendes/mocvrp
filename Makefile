@@ -211,6 +211,34 @@ $(BIN)/exec/ihs_solver_exec : $(BIN)/instance/instance.o \
 
 ihs_solver_exec : $(BIN)/exec/ihs_solver_exec
 
+$(BIN)/test/nsga3_solver_test : $(BIN)/instance/instance.o \
+                                $(BIN)/solution/solution.o \
+                                $(BIN)/solver/solver.o \
+                                $(BIN)/solver/nsga3/problem.o \
+                                $(BIN)/solver/nsga3/nsga3_solver.o \
+                                $(BIN)/test/nsga3_solver_test.o
+	@echo "--> Linking objects..."
+	$(CPP) -o $@ $^ $(CARGS) $(INC)
+	@echo
+	@echo "--> Running test..."
+	$(BIN)/test/nsga3_solver_test
+	@echo
+
+nsga3_solver_test : $(BIN)/test/nsga3_solver_test
+
+$(BIN)/exec/nsga3_solver_exec : $(BIN)/instance/instance.o \
+                                $(BIN)/solution/solution.o \
+                                $(BIN)/solver/solver.o \
+                                $(BIN)/solver/nsga3/problem.o \
+                                $(BIN)/solver/nsga3/nsga3_solver.o \
+                                $(BIN)/utils/argument_parser.o \
+                                $(BIN)/exec/nsga3_solver_exec.o
+	@echo "--> Linking objects..."
+	$(CPP) -o $@ $^ $(CARGS) $(INC)
+	@echo
+
+nsga3_solver_exec : $(BIN)/exec/nsga3_solver_exec
+
 tests : instance_test \
         solution_test \
         nsbrkga_solver_test \
@@ -218,13 +246,15 @@ tests : instance_test \
         nspso_solver_test \
         moead_solver_test \
         mhaco_solver_test \
-        ihs_solver_test
+        ihs_solver_test \
+        nsga3_solver_test
 
 execs : nsbrkga_solver_exec \
         nsga2_solver_exec \
         nspso_solver_exec \
         moead_solver_exec \
         mhaco_solver_exec \
-        ihs_solver_exec
+        ihs_solver_exec \
+        nsga3_solver_exec
 
 all : tests execs
