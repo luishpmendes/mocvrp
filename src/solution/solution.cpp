@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
 #include <sstream>
 
 namespace mocvrp {
@@ -107,6 +108,8 @@ void Solution::compute_value() {
                                min_load / max_load,
                                min_orders / max_orders});
     this->value[4] = total_length;
+
+    this->instance.normalize(this->value);
 }
 
 void Solution::init() {
@@ -299,6 +302,11 @@ bool Solution::is_feasible() const {
             return false;
         }
 
+        // Every objective is normalized to [0,1].
+        if (this->value[i] < 0.0 || this->value[i] > 1.0) {
+            return false;
+        }
+
         // The primal bound holds the worst value of each objective, in the
         // sense of that objective.
         if (this->instance.senses[i] == NSBRKGA::Sense::MINIMIZE) {
@@ -363,7 +371,11 @@ std::ostream & operator <<(std::ostream & os, const Solution & solution) {
         os << std::endl;
     }
 
-    os << "Cost " << solution.value[4] << std::endl;
+    // The cost is the raw total travelled distance, as CVRPLIB prescribes,
+    // rather than its normalized value.
+    os << "Cost "
+       << std::accumulate(solution.length.begin(), solution.length.end(), 0.0)
+       << std::endl;
 
     os.precision(precision);
 

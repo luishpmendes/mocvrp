@@ -1,9 +1,26 @@
 #include "instance/instance.hpp"
+#include <algorithm>
 #include <cassert>
 #include <fstream>
 #include <iostream>
 
 int main() {
+    // The empty instance has no bound at all: its primal bound is zero, and
+    // it is not left undefined by a division by zero.
+    {
+        mocvrp::Instance instance;
+
+        assert(instance.total_orders == 0);
+        assert(instance.max_num_routes == 0);
+        assert(instance.diameter == 0.0);
+        assert(instance.max_total_distance == 0.0);
+        assert(instance.primal_bound.size() == instance.num_objectives);
+
+        for (const double & bound : instance.primal_bound) {
+            assert(bound == 0.0);
+        }
+    }
+
     std::ifstream ifs;
     mocvrp::Instance instance;
 
@@ -45,7 +62,36 @@ int main() {
         assert(instance.senses[2] == NSBRKGA::Sense::MINIMIZE);
         assert(instance.senses[3] == NSBRKGA::Sense::MAXIMIZE);
         assert(instance.senses[4] == NSBRKGA::Sense::MINIMIZE);
-        assert(instance.primal_bound[1] == instance.num_customers);
+
+        double max_dist = 0.0,
+               max_customer_dist = 0.0;
+
+        for (unsigned u = 0; u < instance.num_vertices; u++) {
+            for (unsigned v = u + 1; v < instance.num_vertices; v++) {
+                max_dist = std::max(max_dist, instance.adj[u][v]);
+
+                if (u > 0) {
+                    max_customer_dist = std::max(max_customer_dist,
+                                                 instance.adj[u][v]);
+                }
+            }
+        }
+
+        // Every customer carries a single order by default.
+        assert(instance.total_orders == instance.num_customers);
+        assert(instance.max_num_routes == instance.num_customers);
+        assert(instance.diameter == max_customer_dist);
+        assert(instance.diameter > 0.0);
+        assert(instance.max_total_distance ==
+                2.0 * instance.num_customers * max_dist);
+
+        // The primal bound is normalized: the worst value of each objective
+        // is either the bottom or the top of [0,1].
+        assert(instance.primal_bound[0] == 0.0);
+        assert(instance.primal_bound[1] == 1.0);
+        assert(instance.primal_bound[2] == 1.0);
+        assert(instance.primal_bound[3] == 0.0);
+        assert(instance.primal_bound[4] == 1.0);
         assert(instance.is_valid());
     }
 

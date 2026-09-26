@@ -127,7 +127,8 @@ in \texttt{instances/} and records, as standing assumptions, the properties of
 that data that the later proofs rely on.  \Cref{sec:problem} defines the
 feasible set at the level of solutions, independently of any formulation.
 \Cref{sec:objectives} defines the five objectives, together with the
-conventions that make them well defined in degenerate cases.
+conventions that make them well defined in degenerate cases, and their
+normalisation to $[0,1]$.
 \Cref{sec:pareto} recalls the required multi-objective terminology.
 \Cref{sec:milp} gives the MILP formulation and proves it correct.
 \Cref{sec:variants} discusses the modelling decisions that were open and the
@@ -587,6 +588,92 @@ $f_4 = 1$ by \cref{lem:f4-range}.  These points are legitimate but
 uninformative; if they are to be excluded, the natural device is a minimum
 service level $f_1 \ge \rho \sum_{i\in\Cust} o_i$ imposed as a constraint
 (\cref{sec:alt-side}), not a modification of the objectives.
+\end{remark}
+
+\subsection{Normalised objectives}
+\label{sec:normalised}
+
+The five objectives live on very different scales: $f_1$ counts orders, $f_2$
+counts routes, $f_3$ and $f_5$ are distances, and only $f_4$ is a ratio.  To
+make them commensurable, each one is divided by an upper bound that depends on
+the instance only.  Write
+\begin{equation}
+  d^{\max} \;=\; \max_{(i,j) \in \Arcs} d_{ij},
+  \qquad
+  d^{\max}_{\Cust} \;=\; \max_{i,j \in \Cust} d_{ij}
+  \label{eq:dmax}
+\end{equation}
+for the longest arc and for the \emph{diameter of the instance}, i.e.\ the
+largest distance between two customers, which excludes the depot just as the
+route diameter \eqref{eq:Dr} does.
+
+\begin{definition}[Normalised objective vector]
+\label{def:normalised}
+The \emph{normalised objectives} of a solution $\Routes \in \Feas$ are
+\begin{gather}
+  \hat f_1(\Routes) = \frac{f_1(\Routes)}{\sum_{i \in \Cust} o_i}, \qquad
+  \hat f_2(\Routes) = \frac{f_2(\Routes)}{n}, \qquad
+  \hat f_3(\Routes) = \frac{f_3(\Routes)}{d^{\max}_{\Cust}}, \notag\\
+  \hat f_4(\Routes) = f_4(\Routes), \qquad
+  \hat f_5(\Routes) = \frac{f_5(\Routes)}{2n\,d^{\max}},
+  \label{eq:normalised}
+\end{gather}
+with the optimisation senses of \cref{def:objectives}, and with the convention
+that a quotient whose denominator is zero equals zero.
+\end{definition}
+
+The denominators are the total number of orders; the number of routes of the
+solution that serves every customer on a route of its own, which is the largest
+possible; the diameter of the instance; and a bound on the total distance.
+Under \cref{as:depot,as:orders} and $n \ge 1$, only $d^{\max}_{\Cust}$ can
+vanish, and only when all customers are at mutual distance zero -- in
+particular when $n = 1$.
+
+\begin{proposition}[Range and equivalence]
+\label{prop:normalised}
+For every $\Routes \in \Feas$ and every $t \in \{1,\dots,5\}$,
+$\hat f_t(\Routes) \in [0,1]$.  Moreover each $\hat f_t$ is either $f_t$
+divided by a positive constant of the instance, or identically zero together
+with $f_t$.  Consequently the dominance relation, the efficient set and the
+Pareto front are the same under $(\hat f_1,\dots,\hat f_5)$ as under
+$(f_1,\dots,f_5)$, up to a positive rescaling of each axis.
+\end{proposition}
+
+\begin{proof}
+Every $\hat f_t$ is non-negative, and $\hat f_4 = f_4 \in (0,1]$ by
+\cref{lem:f4-range}.  $f_1(\Routes) \le \sum_{i \in \Cust} o_i$ because
+$\Ground(\Routes) \subseteq \Cust$, and $f_2(\Routes) \le n$ by
+\cref{def:solution}.  Every route diameter \eqref{eq:Dr} is zero or a distance
+between two customers, so $f_3(\Routes) \le d^{\max}_{\Cust}$.  A route with
+$m$ customers traverses $m+1$ arcs, so $\Routes$ traverses
+$|\Ground(\Routes)| + |\Routes| \le 2n$ arcs, each of length at most $d^{\max}$,
+and $f_5(\Routes) \le 2n\,d^{\max}$; no triangle inequality is used.  When a
+denominator is zero, the corresponding bound shows that the objective is
+identically zero on $\Feas$, and its normalised counterpart is zero by
+convention.  Otherwise the denominator is a positive constant, and dividing by
+it preserves every comparison between two solutions in that objective, hence
+dominance as defined in \cref{sec:pareto}.
+\end{proof}
+
+The point $(0,1,1,0,1)$ collects the worst value in $[0,1]$ of each normalised
+objective in its own sense, and so bounds the normalised objective space: the
+maximised $\hat f_1$ and $\hat f_4$ are at least $0$, and the minimised
+$\hat f_2$, $\hat f_3$ and $\hat f_5$ are at most $1$.  The empty solution
+attains $\hat f_1 = 0$, and serving every customer on a route of its own
+attains $\hat f_2 = 1$; the remaining three values are bounds that need not be
+attained, and $\hat f_4 = 0$ never is.
+
+\begin{remark}[Normalisation in the implementation]
+\label{rem:normalised-impl}
+The implementation reports the normalised vector
+$(\hat f_1,\dots,\hat f_5)$ as the value of a solution, and its primal bound is
+the point $(0,1,1,0,1)$ above, with a zero wherever the denominator of
+\eqref{eq:normalised} vanishes.  The solution files it writes keep the raw
+total distance $f_5$ as their \texttt{Cost}, as the CVRPLIB format prescribes.
+The rest of this document, the formulation of \cref{sec:milp} included, is
+stated in terms of the raw objectives, which is equivalent by
+\cref{prop:normalised}; in a weighted-sum scalarisation, normalising amounts to
+dividing each weight by the corresponding denominator.
 \end{remark}
 
 % =========================================================================

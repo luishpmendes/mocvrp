@@ -41,6 +41,11 @@ int main() {
 
             assert(decoder.decode(key, false) == solution.value);
 
+            // The decoded value is normalized to [0,1] as well.
+            for (const double & v : decoder.decode(key, false)) {
+                assert(v >= 0.0 && v <= 1.0);
+            }
+
             // The empty chromosome serves nobody.
             key.assign(2 * instance.num_customers, 0.0);
 

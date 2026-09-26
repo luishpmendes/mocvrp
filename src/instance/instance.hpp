@@ -72,14 +72,38 @@ class Instance {
      *************************************************************/
     bool has_explicit_weights;
 
+    /************************************************
+     * The total number of orders of the customers.
+     ************************************************/
+    unsigned total_orders;
+
+    /*************************************************************
+     * The largest number of routes of a solution, in which every
+     * customer is served by a route of its own.
+     *************************************************************/
+    unsigned max_num_routes;
+
+    /****************************************************************
+     * The instance diameter, that is, the largest distance between
+     * two customers. It does not take the depot into account.
+     ****************************************************************/
+    double diameter;
+
+    /***************************************************************
+     * An upper bound on the total travelled distance of a solution,
+     * which traverses at most two arcs per customer.
+     ***************************************************************/
+    double max_total_distance;
+
     /*********************************
      * The optimization senses.
      *********************************/
     std::vector<NSBRKGA::Sense> senses;
 
-    /********************************
-     * This instance primal bounds.
-     ********************************/
+    /*************************************************************
+     * This instance primal bounds, that is, the worst normalized
+     * value of each objective, in the sense of that objective.
+     *************************************************************/
     std::vector<double> primal_bound;
 
     private:
@@ -122,6 +146,19 @@ class Instance {
      * @return true if this instance is valid; false otherwise.
      ***********************************************************/
     bool is_valid() const;
+
+    /*******************************************************************
+     * Normalizes, in place, the specified value to [0,1], dividing
+     * the delivered orders by the total number of orders, the number
+     * of routes by the largest number of routes, the largest route
+     * diameter by the instance diameter and the total travelled
+     * distance by its upper bound. The route balance is already
+     * normalized, so it is kept as is. An objective whose bound is
+     * zero can only be zero, and it is normalized to zero.
+     *
+     * @param value the value to be normalized.
+     *******************************************************************/
+    void normalize(std::vector<double> & value) const;
 
     /**************************************************************************
      * Standard input operator.

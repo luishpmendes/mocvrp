@@ -171,6 +171,8 @@ std::vector<double> Decoder::decode(NSBRKGA::Chromosome & chromosome,
                          min_orders / max_orders});
     value[4] = total_length;
 
+    this->instance.normalize(value);
+
     return value;
 }
 

@@ -69,14 +69,18 @@ class Solution {
      *****************************/
     std::vector<double> diameter;
 
-    /**************************************************************
-     * The value of the solution, that consists of:
-     * - the number of delivered orders, to be maximized
-     * - the number of routes, to be minimized
-     * - the largest route diameter, to be minimized
+    /******************************************************************
+     * The value of the solution, normalized to [0,1], that consists of:
+     * - the number of delivered orders over the total number of
+     *   orders, to be maximized
+     * - the number of routes over the largest number of routes, to
+     *   be minimized
+     * - the largest route diameter over the instance diameter, to be
+     *   minimized
      * - the route balance, to be maximized
-     * - the total travelled distance, to be minimized
-     **************************************************************/
+     * - the total travelled distance over its upper bound, to be
+     *   minimized
+     ******************************************************************/
     std::vector<double> value;
 
     private:

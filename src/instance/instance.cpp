@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cmath>
 #include <iomanip>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 
@@ -51,6 +52,19 @@ static std::string upper(const std::string & str) {
                    [](unsigned char c) { return std::toupper(c); });
 
     return result;
+}
+
+/**************************************************************
+ * Divides a value by its bound, mapping it to [0,1]. A value
+ * whose bound is zero can only be zero, so it is kept at zero.
+ *
+ * @param value the value to be divided.
+ * @param bound the upper bound on the value.
+ *
+ * @return the value divided by its bound.
+ **************************************************************/
+static double ratio(const double value, const double bound) {
+    return bound > 0.0 ? value / bound : 0.0;
 }
 
 void Instance::init() {
@@ -107,19 +121,28 @@ void Instance::init() {
         }
     }
 
+    this->total_orders = std::accumulate(this->orders.begin(),
+                                         this->orders.end(), 0u);
+    this->max_num_routes = this->num_customers;
+    this->diameter = max_customer_dist;
+    this->max_total_distance = 2.0 * this->num_customers * max_dist;
+
     this->primal_bound.resize(this->num_objectives, 0.0);
     this->primal_bound.assign(this->num_objectives, 0.0);
 
     // No order is delivered.
     this->primal_bound[0] = 0.0;
     // Every customer is served by a route of its own.
-    this->primal_bound[1] = this->num_customers;
-    // The largest distance between two customers.
-    this->primal_bound[2] = max_customer_dist;
+    this->primal_bound[1] = this->max_num_routes;
+    // A route serves the two customers farthest apart.
+    this->primal_bound[2] = this->diameter;
     // The route balance is greater than zero, but it gets arbitrarily close.
     this->primal_bound[3] = 0.0;
     // A solution traverses at most two arcs per customer.
-    this->primal_bound[4] = 2.0 * this->num_customers * max_dist;
+    this->primal_bound[4] = this->max_total_distance;
+
+    // The primal bound lies in the same normalized space as the values.
+    this->normalize(this->primal_bound);
 }
 
 Instance::Instance(const std::vector<std::pair<double, double>> & coord,
@@ -172,7 +195,7 @@ bool Instance::is_valid() const {
     }
 
     for (const double & bound : this->primal_bound) {
-        if (bound < 0.0) {
+        if (bound < 0.0 || bound > 1.0) {
             return false;
         }
     }
@@ -256,6 +279,14 @@ bool Instance::is_valid() const {
     return true;
 }
 
+void Instance::normalize(std::vector<double> & value) const {
+    value[0] = ratio(value[0], this->total_orders);
+    value[1] = ratio(value[1], this->max_num_routes);
+    value[2] = ratio(value[2], this->diameter);
+    // The route balance is already a ratio in [0,1].
+    value[4] = ratio(value[4], this->max_total_distance);
+}
+
 std::istream & operator >>(std::istream & is, Instance & instance) {
     std::string line,
                 edge_weight_type,
@@ -277,6 +308,10 @@ std::istream & operator >>(std::istream & is, Instance & instance) {
     instance.demand.clear();
     instance.orders.clear();
     instance.has_explicit_weights = false;
+    instance.total_orders = 0;
+    instance.max_num_routes = 0;
+    instance.diameter = 0.0;
+    instance.max_total_distance = 0.0;
     instance.senses.clear();
     instance.primal_bound.clear();
 
