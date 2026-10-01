@@ -1,7 +1,7 @@
 #pragma once
 
 #include "chromosome.hpp"
-#include "instance/instance.hpp"
+#include "solution/solution.hpp"
 
 namespace mocvrp {
 /***********************************************************************
@@ -9,9 +9,10 @@ namespace mocvrp {
  * Multi-Objective Capacitated Vehicle Routing Problem with Optional
  * Service.
  *
- * The chromosome has two keys per customer: the first half defines the
- * visiting order and the second half defines which customers are
- * served, exactly as the Solution random key constructor prescribes.
+ * The chromosome has two keys per customer: the second half assigns
+ * each customer to a route, or to none, and the first half defines the
+ * visiting order within each route, exactly as Solution::decode_key
+ * prescribes.
  ***********************************************************************/
 class Decoder {
     public:
@@ -21,10 +22,11 @@ class Decoder {
     const Instance & instance;
 
     /**********************************************************
-     * The served customers and their keys, sorted, of each
-     * thread.
+     * The served customers, with their routes and keys, sorted,
+     * of each thread.
      **********************************************************/
-    std::vector<std::vector<std::pair<double, unsigned>>> permutation_of_thread;
+    std::vector<std::vector<std::tuple<unsigned, double, unsigned>>>
+        permutation_of_thread;
 
     /*********************************************************************
      * The index, within the permutation, at which each route starts, of

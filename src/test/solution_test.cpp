@@ -16,6 +16,87 @@ int main() {
         }
     };
 
+    // The decoded routes follow the random key encoding: the served customers
+    // are those the second half of the key assigns to some route, every route
+    // holds customers assigned to a single route in the visiting order of the
+    // first half, the routes are sorted by assigned route, and an assigned
+    // route is only split when the next customer would exceed the capacity.
+    auto assert_encodes = [](const mocvrp::Instance & instance,
+                             const std::vector<double> & key,
+                             const mocvrp::Solution & solution) {
+        auto route_of = [&](const unsigned customer) {
+            return mocvrp::Solution::route_of_key(
+                    key[instance.num_customers + customer - 1],
+                    instance.max_num_routes);
+        };
+        std::vector<bool> is_served(instance.num_vertices, false);
+
+        for (std::size_t r = 0; r < solution.routes.size(); r++) {
+            const std::vector<unsigned> & route = solution.routes[r];
+
+            assert(!route.empty());
+            assert(solution.load[r] <= instance.capacity);
+
+            for (std::size_t h = 0; h < route.size(); h++) {
+                is_served[route[h]] = true;
+
+                assert(route_of(route[h]) == route_of(route.front()));
+
+                if (h > 0) {
+                    assert(key[route[h - 1] - 1] <= key[route[h] - 1]);
+                }
+            }
+
+            if (r > 0) {
+                const std::vector<unsigned> & previous = solution.routes[r - 1];
+
+                assert(route_of(previous.front()) <= route_of(route.front()));
+
+                if (route_of(previous.front()) == route_of(route.front())) {
+                    assert(key[previous.back() - 1] <= key[route.front() - 1]);
+                    assert(solution.load[r - 1] +
+                           instance.demand[route.front()] >
+                               instance.capacity);
+                }
+            }
+        }
+
+        for (unsigned customer = 1;
+             customer < instance.num_vertices;
+             customer++) {
+            assert(is_served[customer] == (route_of(customer) != 0));
+        }
+    };
+
+    // The interval [0,1) is split into one subinterval per route plus one
+    // for not serving, each closed on the left, and the upper bound 1.0 lies
+    // in the last one. With three routes the boundaries are exact.
+    {
+        assert(mocvrp::Solution::route_of_key(0.0, 3) == 0);
+        assert(mocvrp::Solution::route_of_key(std::nextafter(0.25, 0.0), 3) ==
+                0);
+        assert(mocvrp::Solution::route_of_key(0.25, 3) == 1);
+        assert(mocvrp::Solution::route_of_key(std::nextafter(0.5, 0.0), 3) ==
+                1);
+        assert(mocvrp::Solution::route_of_key(0.5, 3) == 2);
+        assert(mocvrp::Solution::route_of_key(std::nextafter(0.75, 0.0), 3) ==
+                2);
+        assert(mocvrp::Solution::route_of_key(0.75, 3) == 3);
+        assert(mocvrp::Solution::route_of_key(std::nextafter(1.0, 0.0), 3) ==
+                3);
+        assert(mocvrp::Solution::route_of_key(1.0, 3) == 3);
+
+        // The middle of every subinterval lies in it, whatever the number of
+        // routes.
+        for (unsigned num_routes = 1; num_routes <= 1000; num_routes++) {
+            for (unsigned route = 0; route <= num_routes; route++) {
+                assert(mocvrp::Solution::route_of_key(
+                        (route + 0.5) / (num_routes + 1.0), num_routes) ==
+                        route);
+            }
+        }
+    }
+
     // The levelling down example of the formulation document: perfect balance
     // is achieved by driving two extra kilometres for no reason.
     {
@@ -115,6 +196,108 @@ int main() {
                 std::numeric_limits<double>::epsilon());
         assert(partial.dominates(detour));
         assert(!detour.dominates(partial));
+    }
+
+    // The random key encoding on the levelling down instance: the second half
+    // of the key assigns each customer to one of six routes, or to none, by
+    // splitting [0,1) into seven equal subintervals, and the first half
+    // defines the visiting order within each route.
+    {
+        std::vector<std::pair<double, double>> coord = {{0.0, 0.0},
+                                                       {1.0, 0.0},
+                                                       {2.0, 0.0},
+                                                       {3.0, 0.0},
+                                                       {0.0, 2.0},
+                                                       {0.0, 3.0},
+                                                       {0.0, 4.0}};
+        std::vector<unsigned> demand = {0, 5, 5, 5, 5, 5, 5};
+        mocvrp::Instance instance(coord, demand, 15);
+
+        assert(instance.max_num_routes == 6);
+
+        // Builds the key with the specified visiting order keys and assigned
+        // routes, zero being not served, of the customers 1 to 6. Each route
+        // key is the middle of the subinterval of its route.
+        auto make_key = [&](const std::vector<double> & order,
+                            const std::vector<unsigned> & assignment) {
+            std::vector<double> key(order);
+
+            for (const unsigned & route : assignment) {
+                key.push_back((route + 0.5) / (instance.max_num_routes + 1.0));
+            }
+
+            return key;
+        };
+
+        // The key decodes into the specified routes, and into the value of
+        // the solution made of them.
+        auto assert_decodes = [&](
+                const std::vector<double> & key,
+                const std::vector<std::vector<unsigned>> & routes) {
+            mocvrp::Solution solution(instance, key),
+                             expected(instance, routes);
+
+            assert(solution.is_feasible());
+            assert_normalized(solution);
+            assert_encodes(instance, key, solution);
+            assert(solution.routes == routes);
+            assert(solution.value == expected.value);
+
+            return solution;
+        };
+
+        const std::vector<double> order = {0.2, 0.1, 0.3, 0.4, 0.5, 0.6};
+
+        // The customers 1 to 3 share the second route and the customers 4 to
+        // 6 share the fifth one, so the other four routes are left out. The
+        // first half of the key orders each route.
+        assert_decodes(make_key(order, {2, 2, 2, 5, 5, 5}),
+                       {{2, 1, 3}, {4, 5, 6}});
+
+        // The routes are sorted by assigned route, not by visiting order.
+        assert_decodes(make_key(order, {5, 5, 5, 2, 2, 2}),
+                       {{4, 5, 6}, {2, 1, 3}});
+
+        // The customer 3 is not served.
+        mocvrp::Solution partial = assert_decodes(
+                make_key(order, {2, 2, 0, 5, 5, 5}),
+                {{2, 1}, {4, 5, 6}});
+
+        assert(fabs(partial.value[0] - 5.0 / 6.0) <
+                std::numeric_limits<double>::epsilon());
+
+        // Every customer has a route of its own, which attains the largest
+        // number of routes.
+        mocvrp::Solution separate = assert_decodes(
+                make_key(order, {6, 5, 4, 3, 2, 1}),
+                {{6}, {5}, {4}, {3}, {2}, {1}});
+
+        assert(separate.value[0] == 1.0);
+        assert(separate.value[1] == 1.0);
+
+        // All six customers assigned to the third route weigh twice the
+        // capacity, so that route is split in visiting order.
+        assert_decodes(make_key({0.1, 0.4, 0.2, 0.5, 0.3, 0.6},
+                                {3, 3, 3, 3, 3, 3}),
+                       {{1, 3, 5}, {2, 4, 6}});
+
+        // The overload of the first route is split off into a route of its
+        // own, rather than into the second route, which would have room.
+        assert_decodes(make_key(order, {1, 1, 1, 1, 2, 2}),
+                       {{2, 1, 3}, {4}, {5, 6}});
+
+        // The upper bound 1.0 assigns to the last route.
+        std::vector<double> key(order);
+
+        key.resize(2 * instance.num_customers, 1.0);
+
+        assert_decodes(key, {{2, 1, 3}, {4, 5, 6}});
+
+        // Nobody is served when every customer is assigned to no route.
+        mocvrp::Solution empty = assert_decodes(
+                make_key(order, {0, 0, 0, 0, 0, 0}), {});
+
+        assert(empty.value == mocvrp::Solution(instance).value);
     }
 
     // Two customers at the same location: the instance diameter is zero, and
@@ -250,8 +433,8 @@ int main() {
             assert(written_cost == cost);
         }
 
-        // A decoded random key.
-        {
+        // Decoded random keys.
+        for (unsigned i = 0; i < 10; i++) {
             key.resize(2 * instance.num_customers);
 
             for (double & k : key) {
@@ -262,6 +445,7 @@ int main() {
 
             assert(solution.is_feasible());
             assert_normalized(solution);
+            assert_encodes(instance, key, solution);
             assert(solution.value[0] > 0.0);
             assert(solution.value[0] <= 1.0);
             assert(solution.value[1] > 0.0);
@@ -277,6 +461,29 @@ int main() {
             mocvrp::Solution empty_solution(instance);
 
             assert(!empty_solution.dominates(solution));
+        }
+
+        // Decoded random keys that assign every customer to one of the first
+        // few routes, or to none, so that those routes are overloaded and
+        // must be split.
+        for (unsigned num_routes = 1; num_routes <= 10; num_routes++) {
+            std::uniform_int_distribution<unsigned> route_distribution(
+                    0, num_routes);
+
+            key.resize(2 * instance.num_customers);
+
+            for (unsigned i = 0; i < instance.num_customers; i++) {
+                key[i] = distribution(rng);
+                key[instance.num_customers + i] =
+                    (route_distribution(rng) + 0.5) /
+                    (instance.max_num_routes + 1.0);
+            }
+
+            mocvrp::Solution solution(instance, key);
+
+            assert(solution.is_feasible());
+            assert_normalized(solution);
+            assert_encodes(instance, key, solution);
         }
     }
 

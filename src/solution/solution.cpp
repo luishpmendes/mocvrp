@@ -46,6 +46,65 @@ void Solution::negate_maximized(std::vector<double> & value,
     }
 }
 
+unsigned Solution::route_of_key(double key, unsigned num_routes) {
+    // A key that is not a number is not served either.
+    if (!(key > 0.0)) {
+        return 0;
+    }
+
+    // The upper bound 1.0 lies in the last subinterval.
+    if (key >= 1.0) {
+        return num_routes;
+    }
+
+    // The product may round up to num_routes + 1 for a key just below 1.0.
+    return std::min(unsigned(key * (num_routes + 1.0)), num_routes);
+}
+
+void Solution::decode_key(
+        const Instance & instance,
+        const std::vector<double> & key,
+        std::vector<std::tuple<unsigned, double, unsigned>> & permutation,
+        std::vector<unsigned> & route_begin) {
+    permutation.clear();
+    route_begin.clear();
+
+    // The first half of the key defines the visiting order, and the second
+    // half defines the route of each customer, if any.
+    for (unsigned customer = 1; customer < instance.num_vertices; customer++) {
+        const unsigned route = Solution::route_of_key(
+                key[instance.num_customers + customer - 1],
+                instance.max_num_routes);
+
+        if (route > 0) {
+            permutation.push_back(std::make_tuple(route,
+                                                  key[customer - 1],
+                                                  customer));
+        }
+    }
+
+    std::sort(permutation.begin(), permutation.end());
+
+    double current_load = 0.0;
+
+    // Sweeps the served customers, closing the current route whenever the
+    // next customer is assigned to another route or would exceed the vehicles
+    // capacity. Every route is a contiguous segment of the sorted permutation.
+    for (unsigned i = 0; i < permutation.size(); i++) {
+        const unsigned route = std::get<0>(permutation[i]),
+                       customer = std::get<2>(permutation[i]);
+
+        if (route_begin.empty() ||
+            route != std::get<0>(permutation[i - 1]) ||
+            current_load + instance.demand[customer] > instance.capacity) {
+            route_begin.push_back(i);
+            current_load = 0.0;
+        }
+
+        current_load += instance.demand[customer];
+    }
+}
+
 void Solution::compute_value() {
     this->value.resize(this->instance.num_objectives, 0.0);
     this->value.assign(this->instance.num_objectives, 0.0);
@@ -166,36 +225,27 @@ Solution::Solution(const Instance & instance,
 
 Solution::Solution(const Instance & instance,
                    const std::vector<double> & key) : Solution(instance) {
-    std::vector<std::pair<double, unsigned>> permutation;
+    std::vector<std::tuple<unsigned, double, unsigned>> permutation;
+    std::vector<unsigned> route_begin;
 
     permutation.reserve(this->instance.num_customers);
+    route_begin.reserve(this->instance.num_customers);
 
-    // The first half of the key defines the visiting order, and the second
-    // half defines which customers are served.
-    for (unsigned customer = 1;
-         customer < this->instance.num_vertices;
-         customer++) {
-        if (key[this->instance.num_customers + customer - 1] >= 0.5) {
-            permutation.push_back(std::make_pair(key[customer - 1], customer));
+    Solution::decode_key(this->instance, key, permutation, route_begin);
+
+    this->routes.resize(route_begin.size());
+
+    for (std::size_t r = 0; r < route_begin.size(); r++) {
+        const unsigned begin = route_begin[r],
+                       end = r + 1 < route_begin.size() ?
+                             route_begin[r + 1] :
+                             unsigned(permutation.size());
+
+        this->routes[r].reserve(end - begin);
+
+        for (unsigned h = begin; h < end; h++) {
+            this->routes[r].push_back(std::get<2>(permutation[h]));
         }
-    }
-
-    std::sort(permutation.begin(), permutation.end());
-
-    double current_load = 0.0;
-
-    // Sweeps the served customers, closing the current route whenever the
-    // next customer would exceed the vehicles capacity.
-    for (const auto & [k, customer] : permutation) {
-        if (this->routes.empty() ||
-            current_load + this->instance.demand[customer] >
-                this->instance.capacity) {
-            this->routes.push_back(std::vector<unsigned>());
-            current_load = 0.0;
-        }
-
-        this->routes.back().push_back(customer);
-        current_load += this->instance.demand[customer];
     }
 
     this->init();

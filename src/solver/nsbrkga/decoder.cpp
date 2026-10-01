@@ -21,62 +21,31 @@ Decoder::Decoder(const Instance & instance,
 std::vector<double> Decoder::decode(NSBRKGA::Chromosome & chromosome,
                                     bool /* not used */) {
 #   ifdef _OPENMP
-        std::vector<std::pair<double, unsigned>> & permutation =
+        std::vector<std::tuple<unsigned, double, unsigned>> & permutation =
             this->permutation_of_thread[omp_get_thread_num()];
         std::vector<unsigned> & route_begin =
             this->route_begin_of_thread[omp_get_thread_num()];
         std::vector<double> & value =
             this->value_of_thread[omp_get_thread_num()];
 #   else
-        std::vector<std::pair<double, unsigned>> & permutation =
+        std::vector<std::tuple<unsigned, double, unsigned>> & permutation =
             this->permutation_of_thread.front();
         std::vector<unsigned> & route_begin =
             this->route_begin_of_thread.front();
         std::vector<double> & value = this->value_of_thread.front();
 #   endif
 
-    permutation.clear();
-
-    // The first half of the chromosome defines the visiting order, and the
-    // second half defines which customers are served.
-    for (unsigned customer = 1;
-         customer < this->instance.num_vertices;
-         customer++) {
-        if (chromosome[this->instance.num_customers + customer - 1] >= 0.5) {
-            permutation.push_back(std::make_pair(chromosome[customer - 1],
-                                                 customer));
-        }
-    }
-
-    std::sort(permutation.begin(), permutation.end());
+    // The routes are those of the Solution random key constructor, as
+    // contiguous segments of the sorted permutation.
+    Solution::decode_key(this->instance, chromosome, permutation, route_begin);
 
     value.assign(this->instance.num_objectives, 0.0);
 
     // The empty solution delivers nothing, uses no route and travels no
     // distance, and it is perfectly balanced by convention.
-    if (permutation.empty()) {
+    if (route_begin.empty()) {
         value[3] = 1.0;
         return value;
-    }
-
-    route_begin.clear();
-
-    double current_load = 0.0;
-
-    // Sweeps the served customers, closing the current route whenever the
-    // next customer would exceed the vehicles capacity. Every route is a
-    // contiguous segment of the sorted permutation.
-    for (unsigned i = 0; i < permutation.size(); i++) {
-        const unsigned customer = permutation[i].second;
-
-        if (route_begin.empty() ||
-            current_load + this->instance.demand[customer] >
-                this->instance.capacity) {
-            route_begin.push_back(i);
-            current_load = 0.0;
-        }
-
-        current_load += this->instance.demand[customer];
     }
 
     double total_orders = 0.0,
@@ -93,33 +62,39 @@ std::vector<double> Decoder::decode(NSBRKGA::Chromosome & chromosome,
         const unsigned begin = route_begin[r],
                        end = r + 1 < route_begin.size() ?
                              route_begin[r + 1] :
-                             unsigned(permutation.size());
+                             unsigned(permutation.size()),
+                       first = std::get<2>(permutation[begin]),
+                       last = std::get<2>(permutation[end - 1]);
 
         // The route leaves the depot, visits its customers and returns.
-        double length = this->instance.adj[0][permutation[begin].second] +
-                        this->instance.adj[permutation[end - 1].second][0],
+        double length = this->instance.adj[0][first] +
+                        this->instance.adj[last][0],
                load = 0.0,
                num_orders = 0.0,
                diameter = 0.0;
 
         for (unsigned h = begin; h + 1 < end; h++) {
-            length += this->instance.adj[permutation[h].second]
-                                        [permutation[h + 1].second];
+            length += this->instance.adj[std::get<2>(permutation[h])]
+                                        [std::get<2>(permutation[h + 1])];
         }
 
         for (unsigned h = begin; h < end; h++) {
-            load += this->instance.demand[permutation[h].second];
-            num_orders += this->instance.orders[permutation[h].second];
+            const unsigned customer = std::get<2>(permutation[h]);
+
+            load += this->instance.demand[customer];
+            num_orders += this->instance.orders[customer];
         }
 
         // The diameter does not take the depot into account, so a route with
         // a single customer has diameter zero.
         for (unsigned h = begin; h + 1 < end; h++) {
+            const unsigned u = std::get<2>(permutation[h]);
+
             for (unsigned k = h + 1; k < end; k++) {
-                if (diameter < this->instance.adj[permutation[h].second]
-                                                 [permutation[k].second]) {
-                    diameter = this->instance.adj[permutation[h].second]
-                                                 [permutation[k].second];
+                const unsigned v = std::get<2>(permutation[k]);
+
+                if (diameter < this->instance.adj[u][v]) {
+                    diameter = this->instance.adj[u][v];
                 }
             }
         }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "instance/instance.hpp"
+#include <tuple>
 
 namespace mocvrp {
 /*********************************************************
@@ -37,6 +38,48 @@ class Solution {
      *************************************************************/
     static void negate_maximized(std::vector<double> & value,
                                  const std::vector<NSBRKGA::Sense> & senses);
+
+    /****************************************************************
+     * Returns the route to which the specified key assigns a
+     * customer. The interval [0,1) is partitioned into
+     * num_routes + 1 equal subintervals: the first one means that
+     * the customer is not served, and the r-th of the others
+     * assigns the customer to the r-th route. A key of 1.0 is
+     * assigned to the last route.
+     *
+     * @param key        the key of the customer, in [0,1].
+     * @param num_routes the number of routes.
+     *
+     * @return zero if the customer is not served; otherwise, the
+     *         route of the customer, from 1 to num_routes.
+     ****************************************************************/
+    static unsigned route_of_key(double key, unsigned num_routes);
+
+    /********************************************************************
+     * Decodes the specified key into the served customers, sorted by
+     * route and visiting order, and the index at which each route
+     * starts within them.
+     *
+     * The key has two keys per customer. The second half assigns each
+     * customer to a route, or to none, as route_of_key prescribes with
+     * the largest number of routes of the instance. The first half
+     * defines the visiting order within each route. A route whose
+     * load exceeds the vehicles capacity is split, in visiting order,
+     * whenever the next customer would exceed it. Routes that serve
+     * nobody are not routes, so they are left out.
+     *
+     * @param instance    the instance been solved.
+     * @param key         the key to be decoded.
+     * @param permutation the route, the key and the customer of each
+     *                    served customer, sorted.
+     * @param route_begin the index, within the permutation, at which
+     *                    each route starts.
+     ********************************************************************/
+    static void decode_key(
+            const Instance & instance,
+            const std::vector<double> & key,
+            std::vector<std::tuple<unsigned, double, unsigned>> & permutation,
+            std::vector<unsigned> & route_begin);
 
     /****************************
      * The instance been solved.
@@ -104,13 +147,13 @@ class Solution {
     Solution(const Instance & instance,
              const std::vector<std::vector<unsigned>> & routes);
 
-    /*********************************************************
-     * Constructs a new solution.
+    /**************************************************************
+     * Constructs a new solution, as decode_key prescribes.
      *
      * @param instance the instance been solved.
-     * @param key      the key representing the customers
-     *                 been served and their visiting order.
-     *********************************************************/
+     * @param key      the key representing the route of each
+     *                 customer, if any, and the visiting order.
+     **************************************************************/
     Solution(const Instance & instance,
              const std::vector<double> & key);
 

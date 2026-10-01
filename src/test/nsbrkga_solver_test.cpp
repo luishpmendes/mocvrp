@@ -1,5 +1,6 @@
 #include "solver/nsbrkga/nsbrkga_solver.hpp"
 #include <cassert>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <numeric>
@@ -33,24 +34,71 @@ int main() {
             mocvrp::Decoder decoder(instance, 1);
             NSBRKGA::Chromosome key(2 * instance.num_customers);
 
-            for (double & k : key) {
-                k = distribution(rng);
-            }
+            // The decoded value of the chromosome is exactly the value of the
+            // solution it represents, which is feasible.
+            auto assert_agrees = [&](NSBRKGA::Chromosome & chromosome) {
+                mocvrp::Solution solution(instance, chromosome);
+                std::vector<double> value = decoder.decode(chromosome, false);
 
-            mocvrp::Solution solution(instance, key);
+                assert(solution.is_feasible());
+                assert(value == solution.value);
 
-            assert(decoder.decode(key, false) == solution.value);
+                // The decoded value is normalized to [0,1] as well.
+                for (const double & v : value) {
+                    assert(v >= 0.0 && v <= 1.0);
+                }
 
-            // The decoded value is normalized to [0,1] as well.
-            for (const double & v : decoder.decode(key, false)) {
-                assert(v >= 0.0 && v <= 1.0);
+                return solution;
+            };
+
+            // Random chromosomes, half of which assign every customer to one
+            // of the first few routes, or to none, so that those routes are
+            // overloaded and must be split.
+            for (unsigned i = 0; i < 100; i++) {
+                std::uniform_int_distribution<unsigned> route_distribution(
+                        0, 1 + i % 10);
+
+                for (double & k : key) {
+                    k = distribution(rng);
+                }
+
+                if (i % 2 == 1) {
+                    for (unsigned j = instance.num_customers;
+                         j < key.size();
+                         j++) {
+                        key[j] = (route_distribution(rng) +
+                                  distribution(rng)) /
+                                 (instance.max_num_routes + 1.0);
+                    }
+                }
+
+                assert_agrees(key);
             }
 
             // The empty chromosome serves nobody.
             key.assign(2 * instance.num_customers, 0.0);
 
-            assert(decoder.decode(key, false) ==
-                    mocvrp::Solution(instance, key).value);
+            assert(assert_agrees(key).routes.empty());
+
+            // Every customer assigned to the last route overloads it the
+            // most, so it is split into capacity feasible routes.
+            for (unsigned j = 0; j < instance.num_customers; j++) {
+                key[j] = distribution(rng);
+                key[instance.num_customers + j] = std::nextafter(1.0, 0.0);
+            }
+
+            assert(assert_agrees(key).routes.size() > 1);
+
+            // Every customer assigned to a route of its own.
+            for (unsigned j = 0; j < instance.num_customers; j++) {
+                key[instance.num_customers + j] =
+                    (j + 1.5) / (instance.max_num_routes + 1.0);
+            }
+
+            mocvrp::Solution separate = assert_agrees(key);
+
+            assert(separate.routes.size() == instance.num_customers);
+            assert(separate.value[1] == 1.0);
         }
 
         solver = mocvrp::NSBRKGA_Solver(instance);
